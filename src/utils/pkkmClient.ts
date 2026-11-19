@@ -1,3 +1,4 @@
+import { signInWithPopup, signOut } from 'firebase/auth';
 import {
   ALL_INDICATORS,
   COMPONENTS_META,
@@ -6,6 +7,12 @@ import {
   type ProgressNotification,
   type SubmissionStatus,
 } from '../data/pkkmData';
+import { auth, googleProvider } from '../firebase';
+import {
+  BOOTSTRAP_ADMIN_EMAIL,
+  checkCloudMembership,
+  normalizeEmail,
+} from './pkkmFirestore';
 
 const AUTH_TOKEN_KEY = 'pkkm_auth_token';
 const LOCAL_STATE_KEY = 'pkkm_static_state_v1';
@@ -17,6 +24,10 @@ const ADMIN_PASS_SHA256 = '240be518fabd2724ddb6f04eeb1da5967448d7e831c08c8fa8228
 export interface AuthUser {
   username: string;
   name: string;
+  authMode?: 'local' | 'google';
+  email?: string;
+  uid?: string;
+  isCloudAdmin?: boolean;
 }
 
 interface LocalState {
@@ -257,8 +268,79 @@ export async function apiVerifySession(): Promise<AuthUser | null> {
   return null;
 }
 
+export async function apiSignInWithGoogle(): Promise<
+  { ok: true; token: string; user: AuthUser } | { ok: false; error: string }
+> {
+  try {
+    const credential = await signInWithPopup(auth, googleProvider);
+    const fbUser = credential.user;
+    const rawEmail = fbUser.email || '';
+    if (!rawEmail) {
+      await signOut(auth).catch(() => {});
+      return { ok: false, error: 'Akun Google tidak memiliki alamat email yang terverifikasi.' };
+    }
+    const cleanEmail = normalizeEmail(rawEmail);
+    const membership = await checkCloudMembership(cleanEmail);
+    if (!membership.allowed) {
+      await signOut(auth).catch(() => {});
+      return {
+        ok: false,
+        error: `Email ${cleanEmail} belum didaftarkan sebagai kolaborator aktif. Hubungi Administrator (${BOOTSTRAP_ADMIN_EMAIL}) untuk menambahkan akses di menu Tim & PIC Pelaksana.`,
+      };
+    }
+
+    localStorage.removeItem(AUTH_TOKEN_KEY);
+    return {
+      ok: true,
+      token: 'firebase-google',
+      user: {
+        username: cleanEmail,
+        name: fbUser.displayName || membership.member?.name || cleanEmail,
+        authMode: 'google',
+        email: cleanEmail,
+        uid: fbUser.uid,
+        isCloudAdmin: membership.isBootstrapAdmin,
+      },
+    };
+  } catch (err: unknown) {
+    const code =
+      typeof err === 'object' && err !== null && 'code' in err
+        ? String((err as { code?: unknown }).code)
+        : '';
+    const msg = err instanceof Error ? err.message : String(err);
+
+    if (code === 'auth/popup-closed-by-user' || code === 'auth/cancelled-popup-request') {
+      return { ok: false, error: 'Proses masuk Google dibatalkan.' };
+    }
+    if (code === 'auth/popup-blocked') {
+      return {
+        ok: false,
+        error: 'Pop-up login diblokir oleh browser. Izinkan pop-up untuk situs ini lalu coba lagi.',
+      };
+    }
+    if (code === 'auth/unauthorized-domain') {
+      const host = typeof window !== 'undefined' ? window.location.hostname : 'domain ini';
+      return {
+        ok: false,
+        error: `Domain "${host}" belum diizinkan di Firebase Authentication. Tambahkan "${host}" pada Firebase Console -> Authentication -> Settings -> Authorized domains.`,
+      };
+    }
+    return {
+      ok: false,
+      error: `Gagal menghubungkan akun Google Cloud: ${msg}`,
+    };
+  }
+}
+
 export async function apiLogout(): Promise<void> {
   localStorage.removeItem(AUTH_TOKEN_KEY);
+  try {
+    if (auth.currentUser) {
+      await signOut(auth);
+    }
+  } catch {
+    // Ignore sign-out errors
+  }
   try {
     await fetch('/api/auth/logout', { method: 'POST' });
   } catch {

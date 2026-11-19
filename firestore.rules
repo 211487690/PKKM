@@ -1,0 +1,237 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // Global safety net (default deny)
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // =========================================================================
+    // Primitive Helpers
+    // =========================================================================
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isVerifiedUser() {
+      return isSignedIn() && request.auth.token.email_verified == true;
+    }
+
+    function isValidId(id) {
+      return id is string && id.size() >= 1 && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-@\\.]+$');
+    }
+
+    function isValidDocId(id) {
+      return id is string && id.size() >= 1 && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    function isBootstrapAdmin() {
+      return isVerifiedUser() && request.auth.token.email == 'zaeymar@gmail.com';
+    }
+
+    function isActiveMember() {
+      return isVerifiedUser()
+        && request.auth.token.email is string
+        && exists(/databases/$(database)/documents/members/$(request.auth.token.email))
+        && get(/databases/$(database)/documents/members/$(request.auth.token.email)).data.active == true;
+    }
+
+    // =========================================================================
+    // Validation Blueprints
+    // =========================================================================
+    function isValidMember(data) {
+      return data.keys().hasAll(['email', 'name', 'picId', 'active', 'addedByUid', 'createdAt', 'updatedAt'])
+        && data.keys().hasOnly(['email', 'name', 'picId', 'active', 'addedByUid', 'createdAt', 'updatedAt'])
+        && data.email is string && data.email.size() >= 3 && data.email.size() <= 120
+        && data.name is string && data.name.size() >= 1 && data.name.size() <= 120
+        && data.picId is string && data.picId.size() >= 1 && data.picId.size() <= 64 && data.picId.matches('^[a-zA-Z0-9_\\-]+$')
+        && data.active is bool
+        && data.addedByUid is string && data.addedByUid.size() <= 128 && data.addedByUid == request.auth.uid
+        && data.createdAt is timestamp
+        && data.updatedAt is timestamp;
+    }
+
+    function isValidCheckedSubItems(arr) {
+      return arr is list
+        && arr.size() <= 30
+        && (arr.size() == 0 || arr[0] is int);
+    }
+
+    function isValidEmailList(arr) {
+      return arr is list
+        && arr.size() >= 1
+        && arr.size() <= 20
+        && arr[0] is string
+        && arr[0].size() <= 120;
+    }
+
+    function isValidIndicator(data, docId) {
+      return data.keys().hasAll([
+          'indicatorId', 'componentId', 'no', 'status', 'checkedSubItems',
+          'lokasiBerkas', 'catatan', 'updatedBy', 'updatedByUid', 'updatedAt',
+          'serverUpdatedAt', 'archived', 'allowedEmails'
+        ])
+        && data.keys().hasOnly([
+          'indicatorId', 'componentId', 'no', 'status', 'checkedSubItems',
+          'lokasiBerkas', 'catatan', 'updatedBy', 'updatedByUid', 'updatedAt',
+          'serverUpdatedAt', 'archived', 'archivedBy', 'archivedAt', 'allowedEmails'
+        ])
+        && data.indicatorId is string && data.indicatorId == docId && data.indicatorId.size() <= 32
+        && data.componentId is int && data.componentId >= 1 && data.componentId <= 4
+        && data.no is int && data.no >= 1 && data.no <= 60
+        && data.status is string && data.status in ['belum', 'proses', 'disetorkan']
+        && isValidCheckedSubItems(data.checkedSubItems)
+        && data.lokasiBerkas is string && data.lokasiBerkas.size() <= 500
+        && data.catatan is string && data.catatan.size() <= 1000
+        && data.updatedBy is string && data.updatedBy.size() <= 64
+        && data.updatedByUid is string && data.updatedByUid.size() <= 128 && data.updatedByUid == request.auth.uid
+        && data.updatedAt is string && data.updatedAt.size() <= 64
+        && data.serverUpdatedAt == request.time
+        && data.archived is bool
+        && (!('archivedBy' in data) || (data.archivedBy is string && data.archivedBy.size() <= 64))
+        && (!('archivedAt' in data) || (data.archivedAt is string && data.archivedAt.size() <= 64))
+        && isValidEmailList(data.allowedEmails);
+    }
+
+    function isValidStringArray(arr, maxLen) {
+      return arr is list
+        && arr.size() <= maxLen
+        && (arr.size() == 0 || (arr[0] is string && arr[0].size() <= 120));
+    }
+
+    function isValidNotification(data, docId) {
+      return data.keys().hasAll([
+          'id', 'actorId', 'actorName', 'actorUid', 'targetUserIds',
+          'indicatorId', 'componentId', 'indicatorNo', 'type', 'title',
+          'message', 'createdAt', 'serverCreatedAt', 'readBy', 'allowedEmails'
+        ])
+        && data.keys().hasOnly([
+          'id', 'actorId', 'actorName', 'actorUid', 'targetUserIds',
+          'indicatorId', 'componentId', 'indicatorNo', 'type', 'title',
+          'message', 'createdAt', 'serverCreatedAt', 'readBy', 'allowedEmails'
+        ])
+        && data.id is string && data.id == docId && data.id.size() <= 80
+        && data.actorId is string && data.actorId.size() <= 64
+        && data.actorName is string && data.actorName.size() >= 1 && data.actorName.size() <= 120
+        && data.actorUid is string && data.actorUid.size() <= 128
+        && isValidStringArray(data.targetUserIds, 20)
+        && data.indicatorId is string && data.indicatorId.size() <= 32 && data.indicatorId.matches('^[a-zA-Z0-9_\\-]+$')
+        && data.componentId is int && data.componentId >= 1 && data.componentId <= 4
+        && data.indicatorNo is int && data.indicatorNo >= 1 && data.indicatorNo <= 60
+        && data.type is string && data.type in ['status_change', 'subitem_check', 'location_update', 'milestone', 'archive_update']
+        && data.title is string && data.title.size() >= 1 && data.title.size() <= 200
+        && data.message is string && data.message.size() >= 1 && data.message.size() <= 600
+        && data.createdAt is string && data.createdAt.size() <= 64
+        && data.serverCreatedAt is timestamp
+        && isValidStringArray(data.readBy, 25)
+        && isValidEmailList(data.allowedEmails);
+    }
+
+    // =========================================================================
+    // Collections
+    // =========================================================================
+
+    // Health check document for testConnection()
+    match /test/{docId} {
+      allow get: if isVerifiedUser() && isValidDocId(docId);
+    }
+
+    // Team Members (PII protected: list admin-only, get owner or admin)
+    match /members/{memberEmail} {
+      allow get: if isVerifiedUser() && isValidId(memberEmail) && (
+        isBootstrapAdmin() || request.auth.token.email == memberEmail
+      );
+      allow list: if isBootstrapAdmin();
+      allow create: if isBootstrapAdmin()
+        && isValidId(memberEmail)
+        && isValidMember(incoming())
+        && incoming().email == memberEmail
+        && incoming().createdAt == request.time
+        && incoming().updatedAt == request.time;
+      allow update: if isBootstrapAdmin()
+        && isValidId(memberEmail)
+        && isValidMember(incoming())
+        && incoming().email == existing().email
+        && incoming().createdAt == existing().createdAt
+        && incoming().updatedAt == request.time
+        && incoming().diff(existing()).affectedKeys().hasOnly(['name', 'picId', 'active', 'addedByUid', 'updatedAt']);
+      allow delete: if isBootstrapAdmin() && isValidId(memberEmail);
+    }
+
+    // Indicators (89 checklist items)
+    match /indicators/{indicatorId} {
+      allow get: if isVerifiedUser() && isValidDocId(indicatorId) && (
+        isBootstrapAdmin() || request.auth.token.email in existing().allowedEmails || isActiveMember()
+      );
+      allow list: if isVerifiedUser() && (
+        isBootstrapAdmin() || request.auth.token.email in resource.data.allowedEmails
+      );
+      allow create: if isVerifiedUser()
+        && isValidDocId(indicatorId)
+        && isValidIndicator(incoming(), indicatorId)
+        && (isBootstrapAdmin() || isActiveMember());
+      allow update: if isVerifiedUser()
+        && isValidDocId(indicatorId)
+        && isValidIndicator(incoming(), indicatorId)
+        && incoming().indicatorId == existing().indicatorId
+        && incoming().componentId == existing().componentId
+        && incoming().no == existing().no
+        && (
+          (isBootstrapAdmin() && incoming().diff(existing()).affectedKeys().hasOnly([
+            'status', 'checkedSubItems', 'lokasiBerkas', 'catatan',
+            'updatedBy', 'updatedByUid', 'updatedAt', 'serverUpdatedAt',
+            'archived', 'archivedBy', 'archivedAt', 'allowedEmails'
+          ]))
+          ||
+          (isActiveMember()
+            && incoming().allowedEmails == existing().allowedEmails
+            && incoming().archived == existing().archived
+            && incoming().diff(existing()).affectedKeys().hasOnly([
+              'status', 'checkedSubItems', 'lokasiBerkas', 'catatan',
+              'updatedBy', 'updatedByUid', 'updatedAt', 'serverUpdatedAt'
+            ])
+          )
+        );
+      allow delete: if false;
+    }
+
+    // Automatic Progress Notifications
+    match /notifications/{notificationId} {
+      allow get: if isVerifiedUser() && isValidDocId(notificationId) && (
+        isBootstrapAdmin() || request.auth.token.email in existing().allowedEmails || isActiveMember()
+      );
+      allow list: if isVerifiedUser() && (
+        isBootstrapAdmin() || request.auth.token.email in resource.data.allowedEmails
+      );
+      allow create: if isVerifiedUser()
+        && isValidDocId(notificationId)
+        && isValidNotification(incoming(), notificationId)
+        && incoming().actorUid == request.auth.uid
+        && incoming().serverCreatedAt == request.time
+        && (isBootstrapAdmin() || isActiveMember());
+      allow update: if isVerifiedUser()
+        && isValidDocId(notificationId)
+        && isValidNotification(incoming(), notificationId)
+        && incoming().id == existing().id
+        && incoming().actorUid == existing().actorUid
+        && incoming().serverCreatedAt == existing().serverCreatedAt
+        && (isBootstrapAdmin() || isActiveMember())
+        && (
+          (isBootstrapAdmin() && incoming().diff(existing()).affectedKeys().hasOnly(['readBy', 'allowedEmails']))
+          ||
+          incoming().diff(existing()).affectedKeys().hasOnly(['readBy'])
+        );
+      allow delete: if isBootstrapAdmin() && isValidDocId(notificationId);
+    }
+  }
+}

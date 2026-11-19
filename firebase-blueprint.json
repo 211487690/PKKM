@@ -1,0 +1,251 @@
+{
+  "entities": {
+    "TeamMember": {
+      "title": "TeamMember",
+      "description": "Daftar akun Google pengelola/PIC madrasah yang diizinkan menyinkronkan data PKKM 2026.",
+      "type": "object",
+      "properties": {
+        "email": {
+          "type": "string",
+          "format": "email",
+          "maxLength": 120
+        },
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 120
+        },
+        "picId": {
+          "type": "string",
+          "maxLength": 64,
+          "pattern": "^[a-zA-Z0-9_-]+$"
+        },
+        "active": {
+          "type": "boolean"
+        },
+        "addedByUid": {
+          "type": "string",
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_-]+$"
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": [
+        "email",
+        "name",
+        "picId",
+        "active",
+        "addedByUid",
+        "createdAt",
+        "updatedAt"
+      ]
+    },
+    "IndicatorProgressDoc": {
+      "title": "IndicatorProgressDoc",
+      "description": "Status penyetoran, ceklist bukti fisik, arsip, dan lokasi berkas untuk satu indikator PKKM Level 4.",
+      "type": "object",
+      "properties": {
+        "indicatorId": {
+          "type": "string",
+          "minLength": 3,
+          "maxLength": 32,
+          "pattern": "^[a-zA-Z0-9_-]+$"
+        },
+        "componentId": {
+          "type": "integer"
+        },
+        "no": {
+          "type": "integer"
+        },
+        "status": {
+          "type": "string",
+          "enum": [
+            "belum",
+            "proses",
+            "disetorkan"
+          ],
+          "maxLength": 20
+        },
+        "checkedSubItems": {
+          "type": "array",
+          "description": "Indeks sub-item bukti fisik yang telah tercentang (maks 30)."
+        },
+        "lokasiBerkas": {
+          "type": "string",
+          "maxLength": 500
+        },
+        "catatan": {
+          "type": "string",
+          "maxLength": 1000
+        },
+        "updatedBy": {
+          "type": "string",
+          "maxLength": 64
+        },
+        "updatedByUid": {
+          "type": "string",
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_-]+$"
+        },
+        "updatedAt": {
+          "type": "string",
+          "maxLength": 64
+        },
+        "serverUpdatedAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "archived": {
+          "type": "boolean"
+        },
+        "archivedBy": {
+          "type": "string",
+          "maxLength": 64
+        },
+        "archivedAt": {
+          "type": "string",
+          "maxLength": 64
+        },
+        "allowedEmails": {
+          "type": "array",
+          "description": "Daftar email anggota tim terverifikasi yang dapat melihat daftar ini (maks 20)."
+        }
+      },
+      "required": [
+        "indicatorId",
+        "componentId",
+        "no",
+        "status",
+        "checkedSubItems",
+        "lokasiBerkas",
+        "catatan",
+        "updatedBy",
+        "updatedByUid",
+        "updatedAt",
+        "serverUpdatedAt",
+        "archived",
+        "allowedEmails"
+      ]
+    },
+    "ProgressNotificationDoc": {
+      "title": "ProgressNotificationDoc",
+      "description": "Log notifikasi progres otomatis antar pelaksana komponen, Kepala Madrasah, dan Administrator.",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 3,
+          "maxLength": 80,
+          "pattern": "^[a-zA-Z0-9_-]+$"
+        },
+        "actorId": {
+          "type": "string",
+          "maxLength": 64
+        },
+        "actorName": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 120
+        },
+        "actorUid": {
+          "type": "string",
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_-]+$"
+        },
+        "targetUserIds": {
+          "type": "array"
+        },
+        "indicatorId": {
+          "type": "string",
+          "maxLength": 32,
+          "pattern": "^[a-zA-Z0-9_-]+$"
+        },
+        "componentId": {
+          "type": "integer"
+        },
+        "indicatorNo": {
+          "type": "integer"
+        },
+        "type": {
+          "type": "string",
+          "enum": [
+            "status_change",
+            "subitem_check",
+            "location_update",
+            "milestone",
+            "archive_update"
+          ],
+          "maxLength": 32
+        },
+        "title": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 200
+        },
+        "message": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 600
+        },
+        "createdAt": {
+          "type": "string",
+          "maxLength": 64
+        },
+        "serverCreatedAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "readBy": {
+          "type": "array"
+        },
+        "allowedEmails": {
+          "type": "array"
+        }
+      },
+      "required": [
+        "id",
+        "actorId",
+        "actorName",
+        "actorUid",
+        "targetUserIds",
+        "indicatorId",
+        "componentId",
+        "indicatorNo",
+        "type",
+        "title",
+        "message",
+        "createdAt",
+        "serverCreatedAt",
+        "readBy",
+        "allowedEmails"
+      ]
+    }
+  },
+  "firestore": {
+    "/members/{memberEmail}": {
+      "schema": {
+        "$ref": "#/entities/TeamMember"
+      },
+      "description": "Email anggota tim madrasah yang diizinkan mengakses progres PKKM 2026."
+    },
+    "/indicators/{indicatorId}": {
+      "schema": {
+        "$ref": "#/entities/IndicatorProgressDoc"
+      },
+      "description": "Dokumen progres penyetoran & bukti fisik per indikator (k1-1 s/d k4-11)."
+    },
+    "/notifications/{notificationId}": {
+      "schema": {
+        "$ref": "#/entities/ProgressNotificationDoc"
+      },
+      "description": "Log notifikasi progres otomatis antar pelaksana dan pimpinan."
+    }
+  }
+}

@@ -1,10 +1,13 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { motion } from 'motion/react';
+import { onAuthStateChanged, signOut } from 'firebase/auth';
 import {
   Bell,
   Briefcase,
   CheckCheck,
   ClipboardCheck,
+  Cloud,
+  CloudOff,
   Code2,
   Download,
   LayoutDashboard,
@@ -29,14 +32,29 @@ import { TeamPicView } from './components/TeamPicView';
 import { NotificationsView } from './components/NotificationsView';
 import { PhpDeployView } from './components/PhpDeployView';
 import { LoginView } from './components/LoginView';
+import { auth } from './firebase';
 import {
   apiArchiveIndicator,
   apiLoadState,
   apiLogout,
   apiMarkNotificationsRead,
+  apiSignInWithGoogle,
   apiUpdateIndicator,
   apiVerifySession,
+  type AuthUser,
 } from './utils/pkkmClient';
+import {
+  checkCloudMembership,
+  ensureCloudSeeded,
+  fsArchiveIndicator,
+  fsMarkNotificationsRead,
+  fsRemoveCollaborator,
+  fsUpdateIndicator,
+  fsUpsertCollaborator,
+  normalizeEmail,
+  subscribeToPkkmCloud,
+  type CloudTeamMember,
+} from './utils/pkkmFirestore';
 
 const AUTH_TOKEN_KEY = 'pkkm_auth_token';
 
@@ -52,7 +70,14 @@ type NavTab =
 
 export default function App() {
   const [authChecking, setAuthChecking] = useState<boolean>(true);
-  const [authUser, setAuthUser] = useState<{ username: string; name: string } | null>(null);
+  const [authUser, setAuthUser] = useState<AuthUser | null>(null);
+  const [cloudUser, setCloudUser] = useState<{
+    uid: string;
+    email: string;
+    isAdmin: boolean;
+  } | null>(null);
+  const [cloudMembers, setCloudMembers] = useState<CloudTeamMember[]>([]);
+  const [fatalError, setFatalError] = useState<Error | null>(null);
   const [activeTab, setActiveTab] = useState<NavTab>('dashboard');
   const [activeUserId, setActiveUserId] = useState<string>('tata-usaha');
   const [progressMap, setProgressMap] = useState<Record<string, IndicatorProgress>>({});
@@ -65,27 +90,73 @@ export default function App() {
   const [toastMsg, setToastMsg] = useState<string | null>(null);
   const toastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
+  if (fatalError) {
+    throw fatalError;
+  }
+
   useEffect(() => {
-    let cancelled = false;
-    const verifySession = async () => {
+    let mounted = true;
+
+    const unsubAuth = onAuthStateChanged(auth, async (fbUser) => {
+      if (!mounted) return;
+      if (fbUser && fbUser.email) {
+        const cleanEmail = normalizeEmail(fbUser.email);
+        try {
+          const membership = await checkCloudMembership(cleanEmail);
+          if (!mounted) return;
+          if (membership.allowed) {
+            await ensureCloudSeeded(cleanEmail, fbUser.uid);
+            if (!mounted) return;
+            setCloudUser({
+              uid: fbUser.uid,
+              email: cleanEmail,
+              isAdmin: membership.isBootstrapAdmin,
+            });
+            setAuthUser({
+              username: cleanEmail,
+              name: fbUser.displayName || membership.member?.name || cleanEmail,
+              authMode: 'google',
+              email: cleanEmail,
+              uid: fbUser.uid,
+              isCloudAdmin: membership.isBootstrapAdmin,
+            });
+            if (membership.member?.picId) {
+              setActiveUserId(membership.member.picId);
+            }
+            setAuthChecking(false);
+            return;
+          } else {
+            await signOut(auth).catch(() => {});
+          }
+        } catch (err) {
+          if (mounted) {
+            setFatalError(err instanceof Error ? err : new Error(String(err)));
+          }
+        }
+      }
+
+      if (!mounted) return;
+      setCloudUser(null);
+      setCloudMembers([]);
       try {
-        const user = await apiVerifySession();
-        if (!cancelled && user) {
-          setAuthUser(user);
+        const localUser = await apiVerifySession();
+        if (mounted) {
+          setAuthUser(localUser);
         }
       } catch {
         // Ignore session check failure and render login
       } finally {
-        if (!cancelled) setAuthChecking(false);
+        if (mounted) setAuthChecking(false);
       }
-    };
-    verifySession();
+    });
+
     return () => {
-      cancelled = true;
+      mounted = false;
+      unsubAuth();
     };
   }, []);
 
-  const loadState = useCallback(async () => {
+  const loadLocalOrServerState = useCallback(async () => {
     try {
       const data = await apiLoadState();
       setProgressMap(data.progress || {});
@@ -98,19 +169,71 @@ export default function App() {
   }, []);
 
   useEffect(() => {
-    if (authUser) {
-      loadState();
-    }
-  }, [authUser, loadState]);
+    if (!authUser) return;
 
-  const handleLoginSuccess = (token: string, user: { username: string; name: string }) => {
-    localStorage.setItem(AUTH_TOKEN_KEY, token);
-    setAuthUser(user);
-    setLoading(true);
+    if (cloudUser) {
+      setLoading(true);
+      const unsubCloud = subscribeToPkkmCloud(cloudUser.email, {
+        onProgress: (map) => {
+          setProgressMap(map);
+          setLoading(false);
+        },
+        onNotifications: (list) => {
+          setNotifications(list);
+        },
+        onMembers: (members) => {
+          setCloudMembers(members);
+        },
+        onFatalError: (err) => {
+          setFatalError(err);
+        },
+      });
+      return () => {
+        unsubCloud();
+      };
+    }
+
+    loadLocalOrServerState();
+  }, [authUser, cloudUser, loadLocalOrServerState]);
+
+  const handleLoginSuccess = (token: string, user: AuthUser) => {
+    if (user.authMode !== 'google') {
+      localStorage.setItem(AUTH_TOKEN_KEY, token);
+      setAuthUser(user);
+      setLoading(true);
+    } else if (user.email && user.uid) {
+      setCloudUser({
+        uid: user.uid,
+        email: user.email,
+        isAdmin: Boolean(user.isCloudAdmin),
+      });
+      setAuthUser(user);
+      setLoading(true);
+    }
+  };
+
+  const handleConnectCloud = async () => {
+    const res = await apiSignInWithGoogle();
+    if (!res.ok) {
+      showToast(res.error);
+      return;
+    }
+    if (res.user.email && res.user.uid) {
+      await ensureCloudSeeded(res.user.email, res.user.uid);
+      setCloudUser({
+        uid: res.user.uid,
+        email: res.user.email,
+        isAdmin: Boolean(res.user.isCloudAdmin),
+      });
+      setAuthUser(res.user);
+      showToast(`Terhubung ke Cloud Firestore (${res.user.email}) · Sinkronisasi real-time aktif!`);
+    }
   };
 
   const handleLogout = async () => {
     await apiLogout();
+    setCloudUser(null);
+    setCloudMembers([]);
     setAuthUser(null);
     setActiveTab('dashboard');
   };
@@ -161,6 +284,32 @@ export default function App() {
       subItemIndex?: number;
     }
   ) => {
+    const ind = ALL_INDICATORS.find((i) => i.id === indicatorId);
+    const targetNames = (ind?.pics ?? [])
+      .filter((pid) => pid !== activeUserId)
+      .map((pid) => PIC_USERS.find((u) => u.id === pid)?.name)
+      .filter(Boolean);
+
+    if (cloudUser) {
+      try {
+        await fsUpdateIndicator(
+          indicatorId,
+          { ...payload, actorId: activeUserId },
+          progressMap,
+          cloudUser.email,
+          cloudUser.uid
+        );
+        showToast(
+          targetNames.length > 0
+            ? `Tersinkron ke Cloud · Notifikasi terkirim ke ${targetNames.join(', ')} & pimpinan`
+            : 'Tersinkron ke Cloud · Notifikasi terkirim ke Kepala Madrasah & Administrator'
+        );
+      } catch (err) {
+        setFatalError(err instanceof Error ? err : new Error(String(err)));
+      }
+      return;
+    }
+
     const data = await apiUpdateIndicator(indicatorId, {
       ...payload,
       actorId: activeUserId,
@@ -173,12 +322,6 @@ export default function App() {
       }));
       setNotifications(data.notifications || []);
 
-      const ind = ALL_INDICATORS.find((i) => i.id === indicatorId);
-      const targetNames = (ind?.pics ?? [])
-        .filter((pid) => pid !== activeUserId)
-        .map((pid) => PIC_USERS.find((u) => u.id === pid)?.name)
-        .filter(Boolean);
-
       showToast(
         targetNames.length > 0
           ? `Progres disimpan · Notifikasi otomatis terkirim ke ${targetNames.join(', ')} & pimpinan`
@@ -188,6 +331,14 @@ export default function App() {
   };
 
   const handleMarkRead = async (notificationId?: string) => {
+    if (cloudUser) {
+      try {
+        await fsMarkNotificationsRead(activeUserId, notifications, notificationId);
+      } catch (err) {
+        setFatalError(err instanceof Error ? err : new Error(String(err)));
+      }
+      return;
+    }
     const nextNotifs = await apiMarkNotificationsRead(activeUserId, notificationId);
     if (nextNotifs) {
       setNotifications(nextNotifs);
@@ -195,6 +346,25 @@ export default function App() {
   };
 
   const handleArchiveIndicator = async (indicatorId: string, archived: boolean) => {
+    if (cloudUser) {
+      try {
+        await fsArchiveIndicator(
+          { indicatorId, archived, actorId: activeUserId },
+          progressMap,
+          cloudUser.email,
+          cloudUser.uid
+        );
+        showToast(
+          archived
+            ? 'Indikator diarsipkan ke Cloud · Fokus aktif kini tertuju pada item belum selesai'
+            : 'Indikator dikembalikan ke daftar Fokus Pengerjaan Aktif'
+        );
+      } catch (err) {
+        setFatalError(err instanceof Error ? err : new Error(String(err)));
+      }
+      return;
+    }
+
     const data = await apiArchiveIndicator({
       indicatorId,
       archived,
@@ -212,6 +382,26 @@ export default function App() {
   };
 
   const handleBulkArchiveCompleted = async () => {
+    if (cloudUser) {
+      try {
+        const res = await fsArchiveIndicator(
+          { bulkCompleted: true, actorId: activeUserId },
+          progressMap,
+          cloudUser.email,
+          cloudUser.uid
+        );
+        const count = res.archivedCount ?? 0;
+        showToast(
+          count > 0
+            ? `${count} indikator selesai berhasil diarsipkan dan disinkronkan ke Cloud`
+            : 'Tidak ada indikator selesai yang perlu diarsipkan'
+        );
+      } catch (err) {
+        setFatalError(err instanceof Error ? err : new Error(String(err)));
+      }
+      return;
+    }
+
     const data = await apiArchiveIndicator({
       bulkCompleted: true,
       actorId: activeUserId,
@@ -225,6 +415,31 @@ export default function App() {
           ? `${count} indikator yang sudah disetorkan berhasil dipindahkan ke Area Arsip`
           : 'Tidak ada indikator selesai yang perlu diarsipkan'
       );
+    }
+  };
+
+  const handleUpsertCloudMember = async (params: {
+    email: string;
+    name: string;
+    picId: string;
+    active: boolean;
+  }) => {
+    if (!cloudUser) return;
+    try {
+      await fsUpsertCollaborator(params, cloudUser.uid);
+      showToast(`Akses kolaborator ${params.email} diperbarui dan disinkronkan.`);
+    } catch (err) {
+      setFatalError(err instanceof Error ? err : new Error(String(err)));
+    }
+  };
+
+  const handleRemoveCloudMember = async (email: string) => {
+    if (!cloudUser) return;
+    try {
+      await fsRemoveCollaborator(email, cloudUser.uid);
+      showToast(`Akses kolaborator ${email} dihapus.`);
+    } catch (err) {
+      setFatalError(err instanceof Error ? err : new Error(String(err)));
     }
   };
 
@@ -563,7 +778,26 @@ export default function App() {
             </div>
           </div>
 
-          <div className="flex items-center gap-3 shrink-0 relative">
+          <div className="flex items-center gap-2.5 shrink-0 relative">
+            {cloudUser ? (
+              <div
+                title={`Sinkronisasi Cloud Real-Time Aktif (${cloudUser.email})`}
+                className="hidden md:inline-flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-medium bg-teal-50 border border-teal-200 text-teal-800 rounded-lg whitespace-nowrap"
+              >
+                <Cloud className="w-3.5 h-3.5 text-teal-700" />
+                <span>Cloud Real-Time</span>
+              </div>
+            ) : (
+              <button
+                type="button"
+                onClick={handleConnectCloud}
+                className="hidden md:inline-flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-medium bg-amber-50 border border-amber-200 text-amber-800 rounded-lg hover:bg-amber-100 whitespace-nowrap"
+              >
+                <CloudOff className="w-3.5 h-3.5 text-amber-700" />
+                <span>Hubungkan Cloud</span>
+              </button>
+            )}
+
             <button
               type="button"
               onClick={() => setNotifPopoverOpen((o) => !o)}
@@ -669,6 +903,25 @@ export default function App() {
           </div>
         </header>
 
+        {/* Banner Ajakan Sinkronisasi Cloud Saat Berjalan di Mode Lokal */}
+        {!cloudUser && (
+          <div className="mx-4 sm:mx-6 mt-4 px-4 py-3 bg-amber-50 border border-amber-200 rounded-xl flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+            <div className="text-xs text-amber-900 leading-relaxed">
+              <span className="font-semibold">Mode Lokal (Hanya 1 Perangkat):</span> Perubahan
+              saat ini tersimpan di browser ini saja. Hubungkan akun Google Administrator agar
+              data sinkron real-time ke seluruh perangkat tim.
+            </div>
+            <button
+              type="button"
+              onClick={handleConnectCloud}
+              className="inline-flex items-center gap-1.5 px-3.5 py-2 text-xs font-semibold bg-teal-700 text-white rounded-lg hover:bg-teal-800 whitespace-nowrap shrink-0"
+            >
+              <Cloud className="w-3.5 h-3.5" />
+              <span>Hubungkan Google Cloud</span>
+            </button>
+          </div>
+        )}
+
         {/* Toast Feedback */}
         {toastMsg && (
           <div className="mx-4 sm:mx-6 mt-4 px-4 py-2.5 bg-teal-900 text-white text-xs font-medium rounded-lg flex items-center justify-between gap-3">
@@ -726,6 +979,13 @@ export default function App() {
                   progressMap={progressMap}
                   initialSelectedPicId={selectedTeamPicId}
                   onJumpToIndicator={jumpToIndicator}
+                  cloudConnected={Boolean(cloudUser)}
+                  isCloudAdmin={Boolean(cloudUser?.isAdmin)}
+                  cloudEmail={cloudUser?.email}
+                  cloudMembers={cloudMembers}
+                  onConnectCloud={handleConnectCloud}
+                  onUpsertCloudMember={handleUpsertCloudMember}
+                  onRemoveCloudMember={handleRemoveCloudMember}
                 />
               ) : activeTab === 'notifications' ? (
                 <NotificationsView
