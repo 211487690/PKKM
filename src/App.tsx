@@ -35,10 +35,12 @@ import { LoginView } from './components/LoginView';
 import { auth } from './firebase';
 import {
   apiArchiveIndicator,
+  apiConsumeGoogleRedirect,
   apiLoadState,
   apiLogout,
   apiMarkNotificationsRead,
   apiSignInWithGoogle,
+  apiSignInWithGoogleRedirect,
   apiUpdateIndicator,
   apiVerifySession,
   type AuthUser,
@@ -77,6 +79,9 @@ export default function App() {
     isAdmin: boolean;
   } | null>(null);
   const [cloudMembers, setCloudMembers] = useState<CloudTeamMember[]>([]);
+  const [connectingCloud, setConnectingCloud] = useState<boolean>(false);
+  const [cloudError, setCloudError] = useState<string | null>(null);
+  const [cloudCanRedirect, setCloudCanRedirect] = useState<boolean>(false);
   const [fatalError, setFatalError] = useState<Error | null>(null);
   const [activeTab, setActiveTab] = useState<NavTab>('dashboard');
   const [activeUserId, setActiveUserId] = useState<string>('tata-usaha');
@@ -97,6 +102,14 @@ export default function App() {
   useEffect(() => {
     let mounted = true;
 
+    apiConsumeGoogleRedirect().then((redirectRes) => {
+      if (!mounted || !redirectRes) return;
+      if (!redirectRes.ok) {
+        setCloudError(redirectRes.error);
+        setCloudCanRedirect(false);
+      }
+    });
+
     const unsubAuth = onAuthStateChanged(auth, async (fbUser) => {
       if (!mounted) return;
       if (fbUser && fbUser.email) {
@@ -107,11 +120,17 @@ export default function App() {
           if (membership.allowed) {
             await ensureCloudSeeded(cleanEmail, fbUser.uid);
             if (!mounted) return;
-            setCloudUser({
-              uid: fbUser.uid,
-              email: cleanEmail,
-              isAdmin: membership.isBootstrapAdmin,
-            });
+            setCloudError(null);
+            setCloudCanRedirect(false);
+            setCloudUser((prev) =>
+              prev?.uid === fbUser.uid && prev?.email === cleanEmail
+                ? prev
+                : {
+                    uid: fbUser.uid,
+                    email: cleanEmail,
+                    isAdmin: membership.isBootstrapAdmin,
+                  }
+            );
             setAuthUser({
               username: cleanEmail,
               name: fbUser.displayName || membership.member?.name || cleanEmail,
@@ -126,11 +145,15 @@ export default function App() {
             setAuthChecking(false);
             return;
           } else {
+            setCloudError(
+              `Email ${cleanEmail} belum didaftarkan sebagai kolaborator aktif. Masuklah menggunakan email Administrator (zaeymar@gmail.com) atau minta Administrator mendaftarkan ${cleanEmail} di menu Tim & PIC Pelaksana.`
+            );
             await signOut(auth).catch(() => {});
           }
         } catch (err) {
           if (mounted) {
-            setFatalError(err instanceof Error ? err : new Error(String(err)));
+            const msg = err instanceof Error ? err.message : String(err);
+            setCloudError(`Gagal memverifikasi akses Firestore: ${msg}`);
           }
         }
       }
@@ -213,20 +236,50 @@ export default function App() {
   };
 
   const handleConnectCloud = async () => {
-    const res = await apiSignInWithGoogle();
-    if (!res.ok) {
-      showToast(res.error);
-      return;
+    setConnectingCloud(true);
+    setCloudError(null);
+    setCloudCanRedirect(false);
+    try {
+      const res = await apiSignInWithGoogle();
+      if (!res.ok) {
+        setCloudError(res.error);
+        setCloudCanRedirect(Boolean(res.canUseRedirect));
+        showToast(res.error);
+        return;
+      }
+      if (res.user.email && res.user.uid) {
+        await ensureCloudSeeded(res.user.email, res.user.uid);
+        setCloudError(null);
+        setCloudCanRedirect(false);
+        setCloudUser((prev) =>
+          prev?.uid === res.user.uid && prev?.email === res.user.email
+            ? prev
+            : {
+                uid: res.user.uid!,
+                email: res.user.email!,
+                isAdmin: Boolean(res.user.isCloudAdmin),
+              }
+        );
+        setAuthUser(res.user);
+        showToast(`Terhubung ke Cloud Firestore (${res.user.email}) · Sinkronisasi real-time aktif!`);
+      }
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      const errText = `Gagal menghubungkan ke Cloud Firestore: ${msg}`;
+      setCloudError(errText);
+      showToast(errText);
+    } finally {
+      setConnectingCloud(false);
     }
-    if (res.user.email && res.user.uid) {
-      await ensureCloudSeeded(res.user.email, res.user.uid);
-      setCloudUser({
-        uid: res.user.uid,
-        email: res.user.email,
-        isAdmin: Boolean(res.user.isCloudAdmin),
-      });
-      setAuthUser(res.user);
-      showToast(`Terhubung ke Cloud Firestore (${res.user.email}) · Sinkronisasi real-time aktif!`);
+  };
+
+  const handleConnectCloudRedirect = async () => {
+    setConnectingCloud(true);
+    setCloudError(null);
+    const errRes = await apiSignInWithGoogleRedirect();
+    if (errRes && !errRes.ok) {
+      setCloudError(errRes.error);
+      setConnectingCloud(false);
     }
   };
 
@@ -790,11 +843,12 @@ export default function App() {
             ) : (
               <button
                 type="button"
+                disabled={connectingCloud}
                 onClick={handleConnectCloud}
-                className="hidden md:inline-flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-medium bg-amber-50 border border-amber-200 text-amber-800 rounded-lg hover:bg-amber-100 whitespace-nowrap"
+                className="hidden md:inline-flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-medium bg-amber-50 border border-amber-200 text-amber-800 rounded-lg hover:bg-amber-100 disabled:opacity-60 whitespace-nowrap"
               >
                 <CloudOff className="w-3.5 h-3.5 text-amber-700" />
-                <span>Hubungkan Cloud</span>
+                <span>{connectingCloud ? 'Menghubungkan...' : 'Hubungkan Cloud'}</span>
               </button>
             )}
 
@@ -905,20 +959,53 @@ export default function App() {
 
         {/* Banner Ajakan Sinkronisasi Cloud Saat Berjalan di Mode Lokal */}
         {!cloudUser && (
-          <div className="mx-4 sm:mx-6 mt-4 px-4 py-3 bg-amber-50 border border-amber-200 rounded-xl flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-            <div className="text-xs text-amber-900 leading-relaxed">
-              <span className="font-semibold">Mode Lokal (Hanya 1 Perangkat):</span> Perubahan
-              saat ini tersimpan di browser ini saja. Hubungkan akun Google Administrator agar
-              data sinkron real-time ke seluruh perangkat tim.
+          <div className="mx-4 sm:mx-6 mt-4 space-y-2">
+            <div className="px-4 py-3 bg-amber-50 border border-amber-200 rounded-xl flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+              <div className="text-xs text-amber-900 leading-relaxed">
+                <span className="font-semibold">Mode Lokal (Hanya 1 Perangkat):</span> Perubahan
+                saat ini tersimpan di browser ini saja. Hubungkan akun Google Administrator agar
+                data sinkron real-time ke seluruh perangkat tim.
+              </div>
+              <button
+                type="button"
+                disabled={connectingCloud}
+                onClick={handleConnectCloud}
+                className="inline-flex items-center gap-1.5 px-3.5 py-2 text-xs font-semibold bg-teal-700 text-white rounded-lg hover:bg-teal-800 disabled:opacity-60 whitespace-nowrap shrink-0"
+              >
+                <Cloud className="w-3.5 h-3.5" />
+                <span>{connectingCloud ? 'Menghubungkan...' : 'Hubungkan Google Cloud'}</span>
+              </button>
             </div>
-            <button
-              type="button"
-              onClick={handleConnectCloud}
-              className="inline-flex items-center gap-1.5 px-3.5 py-2 text-xs font-semibold bg-teal-700 text-white rounded-lg hover:bg-teal-800 whitespace-nowrap shrink-0"
-            >
-              <Cloud className="w-3.5 h-3.5" />
-              <span>Hubungkan Google Cloud</span>
-            </button>
+
+            {cloudError && (
+              <div
+                role="alert"
+                className="px-4 py-3 bg-rose-50 border border-rose-200 rounded-xl text-xs text-rose-800 flex flex-col sm:flex-row sm:items-center justify-between gap-3"
+              >
+                <div className="leading-relaxed space-y-1">
+                  <div className="font-semibold text-rose-900">Koneksi Google Cloud Belum Berhasil</div>
+                  <div>{cloudError}</div>
+                </div>
+                <div className="flex items-center gap-2 shrink-0">
+                  {cloudCanRedirect && (
+                    <button
+                      type="button"
+                      onClick={handleConnectCloudRedirect}
+                      className="px-3 py-1.5 rounded-lg bg-rose-700 text-white font-semibold hover:bg-rose-800 whitespace-nowrap"
+                    >
+                      Coba Mode Redirect
+                    </button>
+                  )}
+                  <button
+                    type="button"
+                    onClick={() => setCloudError(null)}
+                    className="px-2.5 py-1.5 rounded-lg border border-rose-300 text-rose-800 hover:bg-rose-100"
+                  >
+                    Tutup
+                  </button>
+                </div>
+              </div>
+            )}
           </div>
         )}
 
@@ -983,7 +1070,11 @@ export default function App() {
                   isCloudAdmin={Boolean(cloudUser?.isAdmin)}
                   cloudEmail={cloudUser?.email}
                   cloudMembers={cloudMembers}
+                  connectingCloud={connectingCloud}
+                  cloudError={cloudError}
+                  cloudCanRedirect={cloudCanRedirect}
                   onConnectCloud={handleConnectCloud}
+                  onConnectCloudRedirect={handleConnectCloudRedirect}
                   onUpsertCloudMember={handleUpsertCloudMember}
                   onRemoveCloudMember={handleRemoveCloudMember}
                 />

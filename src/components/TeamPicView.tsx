@@ -24,7 +24,11 @@ interface TeamPicViewProps {
   isCloudAdmin?: boolean;
   cloudEmail?: string | null;
   cloudMembers?: CloudTeamMember[];
+  connectingCloud?: boolean;
+  cloudError?: string | null;
+  cloudCanRedirect?: boolean;
   onConnectCloud?: () => Promise<void>;
+  onConnectCloudRedirect?: () => Promise<void>;
   onUpsertCloudMember?: (params: {
     email: string;
     name: string;
@@ -42,7 +46,11 @@ export const TeamPicView: React.FC<TeamPicViewProps> = ({
   isCloudAdmin = false,
   cloudEmail,
   cloudMembers = [],
+  connectingCloud = false,
+  cloudError = null,
+  cloudCanRedirect = false,
   onConnectCloud,
+  onConnectCloudRedirect,
   onUpsertCloudMember,
   onRemoveCloudMember,
 }) => {
@@ -120,14 +128,30 @@ export const TeamPicView: React.FC<TeamPicViewProps> = ({
           {!cloudConnected && onConnectCloud && (
             <button
               type="button"
+              disabled={connectingCloud}
               onClick={onConnectCloud}
-              className="inline-flex items-center gap-2 px-4 py-2 text-xs font-semibold bg-teal-700 text-white rounded-lg hover:bg-teal-800 whitespace-nowrap shrink-0"
+              className="inline-flex items-center gap-2 px-4 py-2 text-xs font-semibold bg-teal-700 text-white rounded-lg hover:bg-teal-800 disabled:opacity-60 whitespace-nowrap shrink-0"
             >
               <Cloud className="w-4 h-4" />
-              <span>Hubungkan Google Cloud</span>
+              <span>{connectingCloud ? 'Menghubungkan...' : 'Hubungkan Google Cloud'}</span>
             </button>
           )}
         </div>
+
+        {!cloudConnected && cloudError && (
+          <div className="px-3.5 py-2.5 rounded-lg bg-rose-50 border border-rose-200 text-xs text-rose-800 space-y-2">
+            <div>{cloudError}</div>
+            {cloudCanRedirect && onConnectCloudRedirect && (
+              <button
+                type="button"
+                onClick={onConnectCloudRedirect}
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded bg-rose-700 text-white text-[11px] font-semibold hover:bg-rose-800"
+              >
+                Coba Hubungkan via Mode Redirect
+              </button>
+            )}
+          </div>
+        )}
 
         {cloudConnected && isCloudAdmin && onUpsertCloudMember && (
           <div className="pt-3 border-t border-slate-100 space-y-4">

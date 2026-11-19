@@ -1,4 +1,9 @@
-import { signInWithPopup, signOut } from 'firebase/auth';
+import {
+  getRedirectResult,
+  signInWithPopup,
+  signInWithRedirect,
+  signOut,
+} from 'firebase/auth';
 import {
   ALL_INDICATORS,
   COMPONENTS_META,
@@ -268,9 +273,90 @@ export async function apiVerifySession(): Promise<AuthUser | null> {
   return null;
 }
 
-export async function apiSignInWithGoogle(): Promise<
-  { ok: true; token: string; user: AuthUser } | { ok: false; error: string }
-> {
+export type GoogleSignInResult =
+  | { ok: true; token: string; user: AuthUser }
+  | { ok: false; error: string; canUseRedirect?: boolean };
+
+function formatFirebaseAuthError(err: unknown): {
+  error: string;
+  canUseRedirect: boolean;
+} {
+  const code =
+    typeof err === 'object' && err !== null && 'code' in err
+      ? String((err as { code?: unknown }).code)
+      : '';
+  const msg = err instanceof Error ? err.message : String(err);
+
+  if (code === 'auth/popup-closed-by-user') {
+    return {
+      error: 'Jendela login Google ditutup sebelum selesai. Klik lagi untuk masuk atau gunakan mode redirect.',
+      canUseRedirect: true,
+    };
+  }
+  if (code === 'auth/cancelled-popup-request') {
+    return {
+      error: 'Permintaan pop-up login sebelumnya dibatalkan. Silakan klik tombol Hubungkan lagi.',
+      canUseRedirect: true,
+    };
+  }
+  if (
+    code === 'auth/popup-blocked' ||
+    code === 'auth/operation-not-supported-in-this-environment'
+  ) {
+    return {
+      error:
+        'Pop-up login diblokir oleh browser atau dibatasi oleh lingkungan pratinjau. Izinkan pop-up atau gunakan mode Redirect di bawah.',
+      canUseRedirect: true,
+    };
+  }
+  if (code === 'auth/unauthorized-domain') {
+    const host = typeof window !== 'undefined' ? window.location.hostname : 'domain ini';
+    return {
+      error: `Domain "${host}" belum masuk Authorized domains di Firebase Authentication (proyek extended-nature-271nt). Pastikan hostname persis "${host}" sudah ditambahkan.`,
+      canUseRedirect: false,
+    };
+  }
+  if (code === 'auth/operation-not-allowed') {
+    return {
+      error:
+        'Provider Google Sign-In belum diaktifkan di Firebase Console -> Authentication -> Sign-in method -> Google -> Enable.',
+      canUseRedirect: false,
+    };
+  }
+  if (code === 'auth/network-request-failed') {
+    return {
+      error: 'Koneksi internet ke server Firebase terputus. Periksa jaringan lalu coba lagi.',
+      canUseRedirect: false,
+    };
+  }
+  if (code === 'auth/internal-error') {
+    return {
+      error:
+        'Terjadi kendala internal pop-up autentikasi Google (sering terjadi jika cookie pihak ketiga diblokir). Coba gunakan mode Redirect.',
+      canUseRedirect: true,
+    };
+  }
+
+  // Handle JSON error thrown by handleFirestoreError
+  try {
+    const parsed = JSON.parse(msg);
+    if (parsed && typeof parsed === 'object' && 'error' in parsed) {
+      return {
+        error: `Gagal memeriksa akses database Firestore (${parsed.operationType || 'get'}): ${parsed.error}`,
+        canUseRedirect: false,
+      };
+    }
+  } catch {
+    // Not JSON
+  }
+
+  return {
+    error: `Gagal menghubungkan akun Google Cloud${code ? ` [${code}]` : ''}: ${msg}`,
+    canUseRedirect: true,
+  };
+}
+
+export async function apiSignInWithGoogle(): Promise<GoogleSignInResult> {
   try {
     const credential = await signInWithPopup(auth, googleProvider);
     const fbUser = credential.user;
@@ -285,7 +371,7 @@ export async function apiSignInWithGoogle(): Promise<
       await signOut(auth).catch(() => {});
       return {
         ok: false,
-        error: `Email ${cleanEmail} belum didaftarkan sebagai kolaborator aktif. Hubungi Administrator (${BOOTSTRAP_ADMIN_EMAIL}) untuk menambahkan akses di menu Tim & PIC Pelaksana.`,
+        error: `Email ${cleanEmail} belum didaftarkan sebagai kolaborator aktif. Masuklah menggunakan email Administrator (${BOOTSTRAP_ADMIN_EMAIL}) atau minta Administrator mendaftarkan ${cleanEmail} di menu Tim & PIC Pelaksana.`,
       };
     }
 
@@ -303,32 +389,55 @@ export async function apiSignInWithGoogle(): Promise<
       },
     };
   } catch (err: unknown) {
-    const code =
-      typeof err === 'object' && err !== null && 'code' in err
-        ? String((err as { code?: unknown }).code)
-        : '';
-    const msg = err instanceof Error ? err.message : String(err);
-
-    if (code === 'auth/popup-closed-by-user' || code === 'auth/cancelled-popup-request') {
-      return { ok: false, error: 'Proses masuk Google dibatalkan.' };
-    }
-    if (code === 'auth/popup-blocked') {
-      return {
-        ok: false,
-        error: 'Pop-up login diblokir oleh browser. Izinkan pop-up untuk situs ini lalu coba lagi.',
-      };
-    }
-    if (code === 'auth/unauthorized-domain') {
-      const host = typeof window !== 'undefined' ? window.location.hostname : 'domain ini';
-      return {
-        ok: false,
-        error: `Domain "${host}" belum diizinkan di Firebase Authentication. Tambahkan "${host}" pada Firebase Console -> Authentication -> Settings -> Authorized domains.`,
-      };
-    }
+    const formatted = formatFirebaseAuthError(err);
     return {
       ok: false,
-      error: `Gagal menghubungkan akun Google Cloud: ${msg}`,
+      error: formatted.error,
+      canUseRedirect: formatted.canUseRedirect,
     };
+  }
+}
+
+export async function apiSignInWithGoogleRedirect(): Promise<{ ok: false; error: string } | void> {
+  try {
+    await signInWithRedirect(auth, googleProvider);
+  } catch (err: unknown) {
+    const formatted = formatFirebaseAuthError(err);
+    return { ok: false, error: formatted.error };
+  }
+}
+
+export async function apiConsumeGoogleRedirect(): Promise<GoogleSignInResult | null> {
+  try {
+    const result = await getRedirectResult(auth);
+    if (!result || !result.user) return null;
+    const rawEmail = result.user.email || '';
+    if (!rawEmail) return null;
+    const cleanEmail = normalizeEmail(rawEmail);
+    const membership = await checkCloudMembership(cleanEmail);
+    if (!membership.allowed) {
+      await signOut(auth).catch(() => {});
+      return {
+        ok: false,
+        error: `Email ${cleanEmail} belum didaftarkan sebagai kolaborator aktif. Hubungi Administrator (${BOOTSTRAP_ADMIN_EMAIL}).`,
+      };
+    }
+    localStorage.removeItem(AUTH_TOKEN_KEY);
+    return {
+      ok: true,
+      token: 'firebase-google',
+      user: {
+        username: cleanEmail,
+        name: result.user.displayName || membership.member?.name || cleanEmail,
+        authMode: 'google',
+        email: cleanEmail,
+        uid: result.user.uid,
+        isCloudAdmin: membership.isBootstrapAdmin,
+      },
+    };
+  } catch (err: unknown) {
+    const formatted = formatFirebaseAuthError(err);
+    return { ok: false, error: formatted.error, canUseRedirect: false };
   }
 }
 

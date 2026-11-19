@@ -2,7 +2,12 @@ import React, { useState } from 'react';
 import { motion } from 'motion/react';
 import { Cloud, Eye, EyeOff, Lock, LogIn, ShieldCheck, User } from 'lucide-react';
 import { MADRASAH_INFO } from '../data/pkkmData';
-import { apiLogin, apiSignInWithGoogle, type AuthUser } from '../utils/pkkmClient';
+import {
+  apiLogin,
+  apiSignInWithGoogle,
+  apiSignInWithGoogleRedirect,
+  type AuthUser,
+} from '../utils/pkkmClient';
 
 interface LoginViewProps {
   onLoginSuccess: (token: string, user: AuthUser) => void;
@@ -13,12 +18,14 @@ export const LoginView: React.FC<LoginViewProps> = ({ onLoginSuccess }) => {
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
+  const [canUseRedirect, setCanUseRedirect] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [googleSubmitting, setGoogleSubmitting] = useState(false);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setErrorMsg(null);
+    setCanUseRedirect(false);
 
     if (!username.trim() || !password) {
       setErrorMsg('Username dan password wajib diisi.');
@@ -42,17 +49,29 @@ export const LoginView: React.FC<LoginViewProps> = ({ onLoginSuccess }) => {
 
   const handleGoogleLogin = async () => {
     setErrorMsg(null);
+    setCanUseRedirect(false);
     setGoogleSubmitting(true);
     try {
       const result = await apiSignInWithGoogle();
       if (!result.ok) {
         setErrorMsg(result.error);
+        setCanUseRedirect(Boolean(result.canUseRedirect));
         return;
       }
       onLoginSuccess(result.token, result.user);
     } catch {
       setErrorMsg('Gagal memproses login Google Cloud. Silakan coba lagi.');
     } finally {
+      setGoogleSubmitting(false);
+    }
+  };
+
+  const handleGoogleRedirect = async () => {
+    setErrorMsg(null);
+    setGoogleSubmitting(true);
+    const errRes = await apiSignInWithGoogleRedirect();
+    if (errRes && !errRes.ok) {
+      setErrorMsg(errRes.error);
       setGoogleSubmitting(false);
     }
   };
@@ -131,9 +150,18 @@ export const LoginView: React.FC<LoginViewProps> = ({ onLoginSuccess }) => {
               {errorMsg && (
                 <div
                   role="alert"
-                  className="px-3.5 py-2.5 rounded-lg bg-rose-50 border border-rose-200 text-xs font-medium text-rose-700 leading-relaxed"
+                  className="px-3.5 py-2.5 rounded-lg bg-rose-50 border border-rose-200 text-xs font-medium text-rose-700 leading-relaxed space-y-2"
                 >
-                  {errorMsg}
+                  <div>{errorMsg}</div>
+                  {canUseRedirect && (
+                    <button
+                      type="button"
+                      onClick={handleGoogleRedirect}
+                      className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded bg-rose-700 text-white text-[11px] font-semibold hover:bg-rose-800"
+                    >
+                      Coba Login Google via Mode Redirect
+                    </button>
+                  )}
                 </div>
               )}
 

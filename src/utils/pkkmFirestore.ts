@@ -146,59 +146,71 @@ async function getAllowedEmailsList(currentEmail: string): Promise<string[]> {
   return Array.from(emails).slice(0, MAX_ALLOWED_EMAILS);
 }
 
+let activeSeedPromise: Promise<void> | null = null;
+
 export async function ensureCloudSeeded(userEmail: string, userUid: string): Promise<void> {
   const cleanEmail = normalizeEmail(userEmail);
   if (!isBootstrapAdminEmail(cleanEmail)) return;
 
-  try {
-    const checkSnap = await getDocs(query(collection(db, 'indicators'), limit(1)));
-    if (!checkSnap.empty) return;
+  if (activeSeedPromise) {
+    return activeSeedPromise;
+  }
 
-    const allowedEmails = await getAllowedEmailsList(cleanEmail);
-    const nowIso = new Date().toISOString();
-    const batch = writeBatch(db);
+  activeSeedPromise = (async () => {
+    try {
+      const checkSnap = await getDocs(query(collection(db, 'indicators'), limit(1)));
+      if (!checkSnap.empty) return;
 
-    for (const ind of ALL_INDICATORS) {
-      batch.set(doc(db, 'indicators', ind.id), {
-        indicatorId: ind.id,
-        componentId: ind.componentId,
-        no: ind.no,
-        status: 'belum',
-        checkedSubItems: [],
-        lokasiBerkas: '',
-        catatan: '',
-        updatedBy: 'tata-usaha',
-        updatedByUid: userUid,
-        updatedAt: nowIso,
-        serverUpdatedAt: serverTimestamp(),
-        archived: false,
+      const allowedEmails = await getAllowedEmailsList(cleanEmail);
+      const nowIso = new Date().toISOString();
+      const batch = writeBatch(db);
+
+      for (const ind of ALL_INDICATORS) {
+        batch.set(doc(db, 'indicators', ind.id), {
+          indicatorId: ind.id,
+          componentId: ind.componentId,
+          no: ind.no,
+          status: 'belum',
+          checkedSubItems: [],
+          lokasiBerkas: '',
+          catatan: '',
+          updatedBy: 'tata-usaha',
+          updatedByUid: userUid,
+          updatedAt: nowIso,
+          serverUpdatedAt: serverTimestamp(),
+          archived: false,
+          allowedEmails,
+        });
+      }
+
+      batch.set(doc(db, 'notifications', 'notif-init-1'), {
+        id: 'notif-init-1',
+        actorId: 'tata-usaha',
+        actorName: 'Tata Usaha / Administrator',
+        actorUid: userUid,
+        targetUserIds: PIC_USERS.map((u) => u.id).slice(0, 20),
+        indicatorId: 'k1-1',
+        componentId: 1,
+        indicatorNo: 1,
+        type: 'status_change',
+        title: 'Instrumen PKKM 2026 Level 4 Siap Diisi (Cloud Real-Time)',
+        message:
+          '89 butir indikator dalam 4 komponen telah terhubung ke database cloud Firestore. Setiap perubahan otomatis tersinkron ke seluruh perangkat tim.',
+        createdAt: nowIso,
+        serverCreatedAt: serverTimestamp(),
+        readBy: [],
         allowedEmails,
       });
+
+      await batch.commit();
+    } catch (error) {
+      handleFirestoreError(error, OperationType.WRITE, 'indicators');
+    } finally {
+      activeSeedPromise = null;
     }
+  })();
 
-    batch.set(doc(db, 'notifications', 'notif-init-1'), {
-      id: 'notif-init-1',
-      actorId: 'tata-usaha',
-      actorName: 'Tata Usaha / Administrator',
-      actorUid: userUid,
-      targetUserIds: PIC_USERS.map((u) => u.id).slice(0, 20),
-      indicatorId: 'k1-1',
-      componentId: 1,
-      indicatorNo: 1,
-      type: 'status_change',
-      title: 'Instrumen PKKM 2026 Level 4 Siap Diisi (Cloud Real-Time)',
-      message:
-        '89 butir indikator dalam 4 komponen telah terhubung ke database cloud Firestore. Setiap perubahan otomatis tersinkron ke seluruh perangkat tim.',
-      createdAt: nowIso,
-      serverCreatedAt: serverTimestamp(),
-      readBy: [],
-      allowedEmails,
-    });
-
-    await batch.commit();
-  } catch (error) {
-    handleFirestoreError(error, OperationType.WRITE, 'indicators');
-  }
+  return activeSeedPromise;
 }
 
 export function subscribeToPkkmCloud(
