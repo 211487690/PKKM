@@ -128,24 +128,38 @@ function loadLocalState(): LocalState {
       localStorage.setItem(LOCAL_STATE_KEY, JSON.stringify(init));
       return init;
     }
-    const parsed = JSON.parse(raw) as LocalState;
+    const parsed = JSON.parse(raw) as Partial<LocalState>;
+    const normalizedProgress: Record<string, IndicatorProgress> = {};
     for (const ind of ALL_INDICATORS) {
-      if (!parsed.progress?.[ind.id]) {
-        if (!parsed.progress) parsed.progress = {};
-        parsed.progress[ind.id] = {
-          indicatorId: ind.id,
-          status: 'belum',
-          checkedSubItems: [],
-          lokasiBerkas: '',
-          catatan: '',
-          updatedBy: '',
-          updatedAt: '',
-        };
-      }
+      const existing = parsed.progress?.[ind.id];
+      normalizedProgress[ind.id] = {
+        indicatorId: ind.id,
+        status:
+          existing?.status === 'disetorkan' || existing?.status === 'proses'
+            ? existing.status
+            : 'belum',
+        checkedSubItems: Array.isArray(existing?.checkedSubItems)
+          ? existing.checkedSubItems.filter(
+              (n): n is number => typeof n === 'number' && n >= 0 && n < ind.buktiFisik.length
+            )
+          : [],
+        lokasiBerkas: typeof existing?.lokasiBerkas === 'string' ? existing.lokasiBerkas : '',
+        catatan: typeof existing?.catatan === 'string' ? existing.catatan : '',
+        updatedBy: typeof existing?.updatedBy === 'string' ? existing.updatedBy : '',
+        updatedAt: typeof existing?.updatedAt === 'string' ? existing.updatedAt : '',
+        archived: Boolean(existing?.archived),
+        archivedBy: typeof existing?.archivedBy === 'string' ? existing.archivedBy : undefined,
+        archivedAt: typeof existing?.archivedAt === 'string' ? existing.archivedAt : undefined,
+      };
     }
-    if (!parsed.emittedMilestones) parsed.emittedMilestones = {};
-    if (!Array.isArray(parsed.notifications)) parsed.notifications = [];
-    return parsed;
+    return {
+      progress: normalizedProgress,
+      notifications: Array.isArray(parsed.notifications) ? parsed.notifications : [],
+      emittedMilestones:
+        parsed.emittedMilestones && typeof parsed.emittedMilestones === 'object'
+          ? parsed.emittedMilestones
+          : {},
+    };
   } catch {
     return createInitialLocalState();
   }
@@ -168,7 +182,7 @@ export async function apiLogin(
   username: string,
   password: string
 ): Promise<{ ok: true; token: string; user: AuthUser } | { ok: false; error: string }> {
-  const cleanUser = username.trim();
+  const cleanUser = username.trim().toLowerCase();
   try {
     const res = await fetch('/api/auth/login', {
       method: 'POST',
@@ -176,11 +190,14 @@ export async function apiLogin(
       body: JSON.stringify({ username: cleanUser, password }),
     });
     if (isJsonResponse(res)) {
-      const data = await res.json();
+      const data = await res.json().catch(() => ({}));
       if (res.ok && data.token) {
         return { ok: true, token: data.token, user: data.user };
       }
-      return { ok: false, error: data.error || 'Username atau password tidak sesuai.' };
+      // Only stop immediately when the real auth endpoint explicitly rejects credentials (401)
+      if (res.status === 401) {
+        return { ok: false, error: data.error || 'Username atau password tidak sesuai.' };
+      }
     }
   } catch {
     // Backend API unavailable (static deployment such as Vercel SPA) -> verify locally
@@ -189,12 +206,12 @@ export async function apiLogin(
   // Static deployment fallback verification
   const digest = await sha256Hex(password);
   if (cleanUser === ADMIN_USER && digest === ADMIN_PASS_SHA256) {
-    const token = `local.${btoa(JSON.stringify({ u: cleanUser, exp: Date.now() + 86400000 * 7 }))}`;
+    const token = `local.${btoa(JSON.stringify({ u: ADMIN_USER, exp: Date.now() + 86400000 * 7 }))}`;
     return {
       ok: true,
       token,
       user: {
-        username: cleanUser,
+        username: ADMIN_USER,
         name: 'Administrator MI Almaarif 06 Toyomarto',
       },
     };

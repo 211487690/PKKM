@@ -102,7 +102,7 @@ export function ensurePhpSeedSql(): void {
     const lines: string[] = [
       '-- Data Seed Lengkap SIP-PKKM 2026 MIS ALMAARIF 06 TOYOMARTO',
       '-- Berisi 12 PIC, 4 Komponen, 89 Butir Indikator, dan seluruh sub-item Bukti Fisik Level 4',
-      'USE `pkkm_almaarif06`;',
+      '-- Catatan: Pastikan Anda sudah memilih database target sebelum menjalankan script ini (mis. USE pkkm_almaarif06;)',
       '',
       'SET FOREIGN_KEY_CHECKS = 0;',
       'TRUNCATE TABLE `notification_reads`;',
@@ -271,7 +271,7 @@ export function createApiApp(): Express {
   // 0. Authentication endpoints
   app.post('/api/auth/login', (req, res) => {
     const { username, password } = (req.body ?? {}) as { username?: string; password?: string };
-    const cleanUser = String(username ?? '').trim();
+    const cleanUser = String(username ?? '').trim().toLowerCase();
     const passHash = crypto.createHash('sha256').update(String(password ?? '')).digest();
 
     const userValid = cleanUser === ADMIN_USERNAME;

@@ -258,7 +258,7 @@ $pdfDetailPayload = array_map(fn($r) => [
               <div class="text-sm font-semibold text-slate-900 truncate mt-0.5"><?= e($fr['indikator_kinerja']) ?></div>
             </div>
             <div class="flex items-center gap-2 shrink-0">
-              <a href="/?page=komponen&id=<?= (int)$fr['component_id'] ?>#ind-<?= e($fr['id']) ?>" class="px-2.5 py-1.5 text-xs font-medium border border-slate-200 rounded-lg text-slate-700 hover:bg-slate-100">
+              <a href="/?page=komponen&id=<?= (int)$fr['component_id'] ?>&show_archived=1#ind-<?= e($fr['id']) ?>" class="px-2.5 py-1.5 text-xs font-medium border border-slate-200 rounded-lg text-slate-700 hover:bg-slate-100">
                 Buka
               </a>
               <?php if ((int)$activeUser['is_admin'] === 1): ?>
@@ -332,86 +332,137 @@ $pdfDetailPayload = array_map(fn($r) => [
   (function() {
     const deadline = new Date('2026-12-03T23:59:59+07:00').getTime();
     const pad = (n) => String(n).padStart(2, '0');
+    const elDays = document.getElementById('cd-days');
+    const elHours = document.getElementById('cd-hours');
+    const elMins = document.getElementById('cd-mins');
+    const elSecs = document.getElementById('cd-secs');
+
     function updateCountdown() {
+      if (!elDays || !elHours || !elMins || !elSecs) return;
       const diff = deadline - Date.now();
-      if (diff <= 0) return;
-      document.getElementById('cd-days').textContent = pad(Math.floor(diff / 86400000));
-      document.getElementById('cd-hours').textContent = pad(Math.floor((diff / 3600000) % 24));
-      document.getElementById('cd-mins').textContent = pad(Math.floor((diff / 60000) % 60));
-      document.getElementById('cd-secs').textContent = pad(Math.floor((diff / 1000) % 60));
+      if (diff <= 0) {
+        elDays.textContent = '00';
+        elHours.textContent = '00';
+        elMins.textContent = '00';
+        elSecs.textContent = '00';
+        return;
+      }
+      elDays.textContent = pad(Math.floor(diff / 86400000));
+      elHours.textContent = pad(Math.floor((diff / 3600000) % 24));
+      elMins.textContent = pad(Math.floor((diff / 60000) % 60));
+      elSecs.textContent = pad(Math.floor((diff / 1000) % 60));
     }
     updateCountdown();
     setInterval(updateCountdown, 1000);
 
     const pdfBtn = document.getElementById('btn-download-pdf');
-    if (pdfBtn && window.jspdf) {
+    if (pdfBtn) {
       pdfBtn.addEventListener('click', async function() {
-        const { jsPDF } = window.jspdf;
-        const doc = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
-        doc.setFont('helvetica', 'bold');
-        doc.setFontSize(13);
-        doc.text('MIS ALMAARIF 06 TOYOMARTO - LAPORAN REKAPITULASI PKKM 2026', 14, 18);
-        doc.setFont('helvetica', 'normal');
-        doc.setFontSize(8.5);
-        doc.text('NSM: 111235070217 | NPSN: 60715202 | Capaian Global: <?= $pctGlobal ?>% (<?= $totalDisetorkan ?>/<?= $totalInd ?> Butir)', 14, 24);
-        doc.autoTable({
-          startY: 29,
-          head: [['Kode', 'Komponen', 'Skor', 'Butir', 'Disetorkan', 'Proses', 'Belum', 'Bukti Fisik', 'Capaian']],
-          body: <?= json_encode($pdfSummaryRows) ?>,
-          styles: { fontSize: 8 }
-        });
-        doc.autoTable({
-          startY: doc.lastAutoTable.finalY + 8,
-          head: [['Butir', 'Indikator Kinerja', 'PIC', 'Status', 'Bukti', 'Lokasi Berkas']],
-          body: <?= json_encode($pdfDetailPayload) ?>,
-          styles: { fontSize: 7 }
-        });
-        doc.save('Laporan-Rekap-PKKM-2026-MI-Almaarif-06.pdf');
+        if (!window.jspdf) {
+          alert('Pustaka PDF belum termuat. Periksa koneksi internet dan coba lagi.');
+          return;
+        }
+        pdfBtn.disabled = true;
+        try {
+          const { jsPDF } = window.jspdf;
+          const doc = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
+          let headerX = 14;
+          try {
+            const imgRes = await fetch('/assets/logo-mia-06.png');
+            if (imgRes.ok) {
+              const blob = await imgRes.blob();
+              const dataUrl = await new Promise((resolve) => {
+                const r = new FileReader();
+                r.onloadend = () => resolve(typeof r.result === 'string' ? r.result : null);
+                r.readAsDataURL(blob);
+              });
+              if (dataUrl) {
+                doc.addImage(dataUrl, 'PNG', 14, 11, 20, 20);
+                headerX = 38;
+              }
+            }
+          } catch (_) {}
+
+          doc.setFont('helvetica', 'bold');
+          doc.setFontSize(13);
+          doc.text('MIS ALMAARIF 06 TOYOMARTO - LAPORAN REKAPITULASI PKKM 2026', headerX, 18);
+          doc.setFont('helvetica', 'normal');
+          doc.setFontSize(8.5);
+          doc.text('NSM: 111235070217 | NPSN: 60715202 | Capaian Global: <?= $pctGlobal ?>% (<?= $totalDisetorkan ?>/<?= $totalInd ?> Butir)', headerX, 24);
+          doc.text('Developer By Administrator MI Almaarif 06 Toyomarto', headerX, 29);
+
+          doc.autoTable({
+            startY: 36,
+            head: [['Kode', 'Komponen', 'Skor', 'Butir', 'Disetorkan', 'Proses', 'Belum', 'Bukti Fisik', 'Capaian']],
+            body: <?= json_encode($pdfSummaryRows, JSON_HEX_TAG | JSON_HEX_AMP | JSON_UNESCAPED_UNICODE) ?>,
+            headStyles: { fillColor: [15, 118, 110] },
+            styles: { fontSize: 8 }
+          });
+          const nextY = (doc.lastAutoTable && doc.lastAutoTable.finalY ? doc.lastAutoTable.finalY : 70) + 8;
+          doc.autoTable({
+            startY: nextY,
+            head: [['Butir', 'Indikator Kinerja', 'PIC', 'Status', 'Bukti', 'Lokasi Berkas']],
+            body: <?= json_encode($pdfDetailPayload, JSON_HEX_TAG | JSON_HEX_AMP | JSON_UNESCAPED_UNICODE) ?>,
+            headStyles: { fillColor: [15, 118, 110] },
+            styles: { fontSize: 7 }
+          });
+          doc.save('Laporan-Rekap-PKKM-2026-MI-Almaarif-06.pdf');
+        } finally {
+          pdfBtn.disabled = false;
+        }
       });
     }
 
-    new Chart(document.getElementById('barChartPkkm'), {
-      type: 'bar',
-      data: {
-        labels: <?= json_encode($barLabels) ?>,
-        datasets: [
-          {
-            label: 'Indikator Disetorkan (%)',
-            data: <?= json_encode($barIndPct) ?>,
-            backgroundColor: '#0d9488',
-            borderRadius: 4
+    if (window.Chart) {
+      const barCtx = document.getElementById('barChartPkkm');
+      if (barCtx) {
+        new Chart(barCtx, {
+          type: 'bar',
+          data: {
+            labels: <?= json_encode($barLabels, JSON_HEX_TAG | JSON_HEX_AMP | JSON_UNESCAPED_UNICODE) ?>,
+            datasets: [
+              {
+                label: 'Indikator Disetorkan (%)',
+                data: <?= json_encode($barIndPct, JSON_HEX_TAG | JSON_HEX_AMP | JSON_UNESCAPED_UNICODE) ?>,
+                backgroundColor: '#0d9488',
+                borderRadius: 4
+              },
+              {
+                label: 'Bukti Fisik Tercentang (%)',
+                data: <?= json_encode($barSubPct, JSON_HEX_TAG | JSON_HEX_AMP | JSON_UNESCAPED_UNICODE) ?>,
+                backgroundColor: '#94a3b8',
+                borderRadius: 4
+              }
+            ]
           },
-          {
-            label: 'Bukti Fisik Tercentang (%)',
-            data: <?= json_encode($barSubPct) ?>,
-            backgroundColor: '#94a3b8',
-            borderRadius: 4
+          options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            scales: { y: { beginAtZero: true, max: 100 } }
           }
-        ]
-      },
-      options: {
-        responsive: true,
-        maintainAspectRatio: false,
-        scales: { y: { beginAtZero: true, max: 100 } }
+        });
       }
-    });
 
-    new Chart(document.getElementById('pieChartPkkm'), {
-      type: 'doughnut',
-      data: {
-        labels: ['Sudah Disetorkan', 'Dalam Proses', 'Belum Disetor'],
-        datasets: [{
-          data: [<?= $totalDisetorkan ?>, <?= $totalProses ?>, <?= $totalBelum ?>],
-          backgroundColor: ['#0d9488', '#d97706', '#94a3b8'],
-          borderWidth: 2,
-          borderColor: '#ffffff'
-        }]
-      },
-      options: {
-        responsive: true,
-        maintainAspectRatio: false,
-        cutout: '62%'
+      const pieCtx = document.getElementById('pieChartPkkm');
+      if (pieCtx) {
+        new Chart(pieCtx, {
+          type: 'doughnut',
+          data: {
+            labels: ['Sudah Disetorkan', 'Dalam Proses', 'Belum Disetor'],
+            datasets: [{
+              data: [<?= $totalDisetorkan ?>, <?= $totalProses ?>, <?= $totalBelum ?>],
+              backgroundColor: ['#0d9488', '#d97706', '#94a3b8'],
+              borderWidth: 2,
+              borderColor: '#ffffff'
+            }]
+          },
+          options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            cutout: '62%'
+          }
+        });
       }
-    });
+    }
   })();
 </script>

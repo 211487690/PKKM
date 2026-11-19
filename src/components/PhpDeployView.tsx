@@ -78,7 +78,21 @@ export const PhpDeployView: React.FC = () => {
 
   const handleCopy = async () => {
     if (!currentFile) return;
-    await navigator.clipboard.writeText(currentFile.content);
+    try {
+      await navigator.clipboard.writeText(currentFile.content);
+    } catch {
+      const textarea = document.createElement('textarea');
+      textarea.value = currentFile.content;
+      textarea.style.position = 'fixed';
+      textarea.style.opacity = '0';
+      document.body.appendChild(textarea);
+      textarea.select();
+      try {
+        document.execCommand('copy');
+      } finally {
+        document.body.removeChild(textarea);
+      }
+    }
     setCopied(true);
     setTimeout(() => setCopied(false), 1800);
   };
@@ -86,23 +100,23 @@ export const PhpDeployView: React.FC = () => {
   const handleDownloadZip = async () => {
     setDownloadingZip(true);
     try {
-      const res = await fetch('/api/download-php-zip');
-      const ct = res.headers.get('content-type') || '';
-      if (res.ok && ct.includes('application/zip')) {
-        const blob = await res.blob();
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement('a');
-        a.href = url;
-        a.download = 'sip-pkkm-2026-php-pdo-vercel.zip';
-        a.click();
-        URL.revokeObjectURL(url);
-        return;
+      try {
+        const res = await fetch('/api/download-php-zip');
+        const ct = res.headers.get('content-type') || '';
+        if (res.ok && ct.includes('application/zip')) {
+          const blob = await res.blob();
+          const url = URL.createObjectURL(blob);
+          const a = document.createElement('a');
+          a.href = url;
+          a.download = 'sip-pkkm-2026-php-pdo-vercel.zip';
+          a.click();
+          URL.revokeObjectURL(url);
+          return;
+        }
+      } catch {
+        // Fall back to client-side JSZip bundle
       }
-    } catch {
-      // Fall back to client-side JSZip bundle
-    }
 
-    try {
       const zip = new JSZip();
       for (const f of files) {
         zip.file(f.path, f.content);

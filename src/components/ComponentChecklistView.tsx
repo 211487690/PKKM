@@ -43,7 +43,7 @@ export const ComponentChecklistView: React.FC<ComponentChecklistViewProps> = ({
   highlightedIndicatorId,
   onUpdateIndicator,
 }) => {
-  const compMeta = COMPONENTS_META.find((c) => c.id === componentId)!;
+  const compMeta = COMPONENTS_META.find((c) => c.id === componentId) ?? COMPONENTS_META[0];
   const compIndicators = useMemo(
     () => ALL_INDICATORS.filter((i) => i.componentId === componentId),
     [componentId]
@@ -139,26 +139,38 @@ export const ComponentChecklistView: React.FC<ComponentChecklistViewProps> = ({
   };
 
   const handleToggleSubItem = async (ind: IndicatorItem, idx: number) => {
+    if (savingId === ind.id) return;
     const prevChecked = progressMap[ind.id]?.checkedSubItems ?? [];
     const exists = prevChecked.includes(idx);
     const nextChecked = exists
       ? prevChecked.filter((i) => i !== idx)
       : [...prevChecked, idx];
 
-    await onUpdateIndicator(ind.id, {
-      checkedSubItems: nextChecked,
-      actionType: 'subitem_check',
-      subItemIndex: idx,
-    });
+    setSavingId(ind.id);
+    try {
+      await onUpdateIndicator(ind.id, {
+        checkedSubItems: nextChecked,
+        actionType: 'subitem_check',
+        subItemIndex: idx,
+      });
+    } finally {
+      setSavingId(null);
+    }
   };
 
   const handleCheckAllSubItems = async (ind: IndicatorItem, checkAll: boolean) => {
+    if (savingId === ind.id) return;
     const nextChecked = checkAll ? ind.buktiFisik.map((_, i) => i) : [];
-    await onUpdateIndicator(ind.id, {
-      checkedSubItems: nextChecked,
-      status: checkAll ? 'disetorkan' : 'belum',
-      actionType: 'status_change',
-    });
+    setSavingId(ind.id);
+    try {
+      await onUpdateIndicator(ind.id, {
+        checkedSubItems: nextChecked,
+        status: checkAll ? 'disetorkan' : 'belum',
+        actionType: 'status_change',
+      });
+    } finally {
+      setSavingId(null);
+    }
   };
 
   const handleStatusChange = async (ind: IndicatorItem, newStatus: SubmissionStatus) => {

@@ -1,6 +1,6 @@
 -- Data Seed Lengkap SIP-PKKM 2026 MIS ALMAARIF 06 TOYOMARTO
 -- Berisi 12 PIC, 4 Komponen, 89 Butir Indikator, dan seluruh sub-item Bukti Fisik Level 4
-USE `pkkm_almaarif06`;
+-- Catatan: Pastikan Anda sudah memilih database target sebelum menjalankan script ini (mis. USE pkkm_almaarif06;)
 
 SET FOREIGN_KEY_CHECKS = 0;
 TRUNCATE TABLE `notification_reads`;

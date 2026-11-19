@@ -40,7 +40,7 @@
             <p class="text-sm text-slate-600"><?= e($n['message']) ?></p>
           </div>
           <div class="flex items-center gap-2 shrink-0">
-            <a href="/?page=komponen&id=<?= (int)$n['component_id'] ?>" class="px-3 py-1.5 text-xs font-medium border border-slate-200 rounded-lg hover:bg-slate-50">
+            <a href="/?page=komponen&id=<?= (int)$n['component_id'] ?>&show_archived=1#ind-<?= e($n['indicator_id']) ?>" class="px-3 py-1.5 text-xs font-medium border border-slate-200 rounded-lg hover:bg-slate-50">
               Buka Indikator
             </a>
             <?php if ($isUnread): ?>

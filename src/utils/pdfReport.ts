@@ -15,13 +15,41 @@ async function loadLogoDataUrl(): Promise<string | null> {
     const res = await fetch(LOGO_URL);
     if (!res.ok) return null;
     const blob = await res.blob();
-    return await new Promise((resolve) => {
+    const rawDataUrl = await new Promise<string | null>((resolve) => {
       const reader = new FileReader();
       reader.onloadend = () =>
         resolve(typeof reader.result === 'string' ? reader.result : null);
       reader.onerror = () => resolve(null);
       reader.readAsDataURL(blob);
     });
+    if (!rawDataUrl) return null;
+
+    // Resize logo to 256x256 in browser canvas so PDF stays compact & fast
+    if (typeof document !== 'undefined') {
+      const resized = await new Promise<string | null>((resolve) => {
+        const img = new Image();
+        img.onload = () => {
+          try {
+            const canvas = document.createElement('canvas');
+            canvas.width = 256;
+            canvas.height = 256;
+            const ctx = canvas.getContext('2d');
+            if (!ctx) {
+              resolve(rawDataUrl);
+              return;
+            }
+            ctx.drawImage(img, 0, 0, 256, 256);
+            resolve(canvas.toDataURL('image/png'));
+          } catch {
+            resolve(rawDataUrl);
+          }
+        };
+        img.onerror = () => resolve(rawDataUrl);
+        img.src = rawDataUrl;
+      });
+      return resized;
+    }
+    return rawDataUrl;
   } catch {
     return null;
   }
@@ -55,11 +83,17 @@ export async function generatePkkmPdfReport(
   // ============================================================
   // KOP LAPORAN RESMI MADRASAH
   // ============================================================
+  let logoEmbedded = false;
   if (logoDataUrl) {
-    doc.addImage(logoDataUrl, 'PNG', marginX, 11, 20, 20);
+    try {
+      doc.addImage(logoDataUrl, 'PNG', marginX, 11, 20, 20);
+      logoEmbedded = true;
+    } catch {
+      logoEmbedded = false;
+    }
   }
 
-  const headerTextX = logoDataUrl ? marginX + 24 : marginX;
+  const headerTextX = logoEmbedded ? marginX + 24 : marginX;
   doc.setFont('helvetica', 'bold');
   doc.setFontSize(9);
   doc.setTextColor(15, 118, 110); // teal-700

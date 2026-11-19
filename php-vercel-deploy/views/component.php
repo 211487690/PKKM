@@ -5,10 +5,14 @@ $comp = $compStmt->fetch();
 
 $filterStatus = $_GET['status'] ?? 'all';
 $filterPic = $_GET['pic'] ?? 'all';
+$showArchived = ((int)($_GET['show_archived'] ?? 0)) === 1;
 $search = trim((string)($_GET['q'] ?? ''));
 
 $indSql = "SELECT * FROM indicators WHERE component_id = ?";
 $params = [$compId];
+if (!$showArchived) {
+    $indSql .= " AND is_archived = 0";
+}
 if (in_array($filterStatus, ['belum', 'proses', 'disetorkan'], true)) {
     $indSql .= " AND status = ?";
     $params[] = $filterStatus;
@@ -74,6 +78,10 @@ $compPics = $compPicsStmt->fetchAll();
         <option value="proses" <?= $filterStatus === 'proses' ? 'selected' : '' ?>>Dalam Proses</option>
         <option value="belum" <?= $filterStatus === 'belum' ? 'selected' : '' ?>>Belum Disetor</option>
       </select>
+      <label class="inline-flex items-center gap-1.5 text-xs text-slate-600 px-2 py-1.5 border border-slate-200 rounded-lg bg-slate-50 cursor-pointer">
+        <input type="checkbox" name="show_archived" value="1" <?= $showArchived ? 'checked' : '' ?> onchange="this.form.submit()" class="rounded border-slate-300 text-teal-700" />
+        <span>Tampilkan Arsip</span>
+      </label>
       <button type="submit" class="px-4 py-2 text-sm font-semibold bg-slate-900 text-white rounded-lg hover:bg-slate-800">Filter</button>
     </div>
   </form>
@@ -102,7 +110,7 @@ $compPics = $compPicsStmt->fetchAll();
       }
       $totalSub = count($subItems);
     ?>
-      <div class="bg-white border border-slate-200 rounded-xl p-5">
+      <div id="ind-<?= e($ind['id']) ?>" class="bg-white border border-slate-200 rounded-xl p-5">
         <div class="flex flex-col lg:flex-row lg:items-start justify-between gap-4">
           <div class="space-y-1 flex-1">
             <div class="flex flex-wrap items-center gap-2 text-xs text-slate-500">
@@ -111,6 +119,10 @@ $compPics = $compPicsStmt->fetchAll();
               <span>Pelaksana: <strong class="text-slate-800"><?= e($ind['raw_keterangan']) ?></strong></span>
               <span>·</span>
               <span class="font-mono tabular-nums"><?= $doneSub ?>/<?= $totalSub ?> bukti tercentang</span>
+              <?php if ((int)$ind['is_archived'] === 1): ?>
+                <span>·</span>
+                <span class="font-medium text-slate-500">Diarsipkan</span>
+              <?php endif; ?>
             </div>
             <div class="text-xs text-slate-500"><?= e($ind['unsur_tugas']) ?></div>
             <h3 class="font-display text-base font-bold text-slate-900"><?= e($ind['indikator_kinerja']) ?></h3>

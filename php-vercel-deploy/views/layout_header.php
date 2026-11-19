@@ -86,8 +86,15 @@
         <span class="text-slate-900 font-semibold">
           <?php
             if ($page === 'komponen') {
-                $cid = (int)($_GET['id'] ?? 1);
-                echo 'Komponen ' . $cid . ' · ' . e($componentsSummary[$cid - 1]['title'] ?? '');
+                $cid = max(1, min(4, (int)($_GET['id'] ?? 1)));
+                $compTitle = '';
+                foreach ($componentsSummary as $cs) {
+                    if ((int)$cs['id'] === $cid) {
+                        $compTitle = (string)$cs['title'];
+                        break;
+                    }
+                }
+                echo 'Komponen ' . $cid . ' · ' . e($compTitle);
             } elseif ($page === 'tim') {
                 echo 'Tim & PIC Pelaksana';
             } elseif ($page === 'notifikasi') {

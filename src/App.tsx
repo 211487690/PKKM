@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { motion } from 'motion/react';
 import {
   Bell,
@@ -63,6 +63,7 @@ export default function App() {
   const [highlightedIndicatorId, setHighlightedIndicatorId] = useState<string | null>(null);
   const [selectedTeamPicId, setSelectedTeamPicId] = useState<string | null>(null);
   const [toastMsg, setToastMsg] = useState<string | null>(null);
+  const toastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -72,6 +73,8 @@ export default function App() {
         if (!cancelled && user) {
           setAuthUser(user);
         }
+      } catch {
+        // Ignore session check failure and render login
       } finally {
         if (!cancelled) setAuthChecking(false);
       }
@@ -87,6 +90,8 @@ export default function App() {
       const data = await apiLoadState();
       setProgressMap(data.progress || {});
       setNotifications(data.notifications || []);
+    } catch {
+      setToastMsg('Gagal memuat sebagian data progres. Menggunakan data lokal.');
     } finally {
       setLoading(false);
     }
@@ -135,9 +140,13 @@ export default function App() {
   );
 
   const showToast = (msg: string) => {
+    if (toastTimerRef.current) {
+      clearTimeout(toastTimerRef.current);
+    }
     setToastMsg(msg);
-    setTimeout(() => {
-      setToastMsg((prev) => (prev === msg ? null : prev));
+    toastTimerRef.current = setTimeout(() => {
+      setToastMsg(null);
+      toastTimerRef.current = null;
     }, 3500);
   };
 
@@ -405,6 +414,7 @@ export default function App() {
         <button
           type="button"
           onClick={() => {
+            setSelectedTeamPicId(null);
             setActiveTab('team');
             setMobileMenuOpen(false);
           }}

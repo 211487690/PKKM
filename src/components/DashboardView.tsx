@@ -31,7 +31,6 @@ import {
   PIC_USERS,
   type IndicatorProgress,
 } from '../data/pkkmData';
-import { generatePkkmPdfReport } from '../utils/pdfReport';
 
 interface DashboardViewProps {
   progressMap: Record<string, IndicatorProgress>;
@@ -80,6 +79,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
   const [archiveCompFilter, setArchiveCompFilter] = useState<number>(0);
   const [busyId, setBusyId] = useState<string | null>(null);
   const [exportingPdf, setExportingPdf] = useState<boolean>(false);
+  const [pdfError, setPdfError] = useState<string | null>(null);
 
   useEffect(() => {
     const timer = setInterval(() => setNowMs(Date.now()), 1000);
@@ -197,20 +197,19 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
 
   const handleDownloadPdf = async () => {
     setExportingPdf(true);
+    setPdfError(null);
     try {
+      const { generatePkkmPdfReport } = await import('../utils/pdfReport');
       await generatePkkmPdfReport(progressMap);
+    } catch {
+      setPdfError('Gagal membuat file PDF. Silakan coba lagi.');
     } finally {
       setExportingPdf(false);
     }
   };
 
   return (
-    <motion.div
-      initial={{ opacity: 0, y: 8 }}
-      animate={{ opacity: 1, y: 0 }}
-      transition={{ duration: 0.22, ease: [0.16, 1, 0.3, 1] }}
-      className="space-y-6"
-    >
+    <div className="space-y-6">
       {/* Identitas Lembaga, Logo & Countdown Deadline 3 Desember 2026 */}
       <section className="bg-white border border-slate-200 rounded-xl p-6">
         <div className="flex flex-col xl:flex-row xl:items-center xl:justify-between gap-6">
@@ -251,7 +250,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                 </span>
               </div>
 
-              <div className="pt-1">
+              <div className="pt-1 space-y-2">
                 <button
                   type="button"
                   disabled={exportingPdf}
@@ -265,6 +264,11 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                       : 'Unduh Laporan Rekapitulasi (PDF)'}
                   </span>
                 </button>
+                {pdfError && (
+                  <p role="alert" className="text-xs font-medium text-rose-600">
+                    {pdfError}
+                  </p>
+                )}
               </div>
             </div>
           </div>
@@ -370,7 +374,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
 
       {/* Visualisasi Grafik Batang & Diagram Pie (Recharts) */}
       <section className="grid grid-cols-1 lg:grid-cols-12 gap-4 items-stretch">
-        <div className="lg:col-span-7 bg-white border border-slate-200 rounded-xl p-6 flex flex-col justify-between">
+        <div className="lg:col-span-7 min-w-0 bg-white border border-slate-200 rounded-xl p-6 flex flex-col justify-between">
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 mb-4">
             <div>
               <h2 className="font-display text-base font-bold text-slate-900">
@@ -392,8 +396,8 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
             </div>
           </div>
 
-          <div className="h-72 w-full">
-            <ResponsiveContainer width="100%" height="100%">
+          <div className="h-72 w-full min-w-0">
+            <ResponsiveContainer width="100%" height={288} minWidth={0}>
               <BarChart
                 data={barChartData}
                 margin={{ top: 10, right: 12, left: -12, bottom: 4 }}
@@ -454,7 +458,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
           </div>
         </div>
 
-        <div className="lg:col-span-5 bg-white border border-slate-200 rounded-xl p-6 flex flex-col justify-between">
+        <div className="lg:col-span-5 min-w-0 bg-white border border-slate-200 rounded-xl p-6 flex flex-col justify-between">
           <div>
             <h2 className="font-display text-base font-bold text-slate-900">
               Diagram Proporsi Status (89 Indikator)
@@ -464,8 +468,8 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
             </p>
           </div>
 
-          <div className="relative h-56 w-full my-2">
-            <ResponsiveContainer width="100%" height="100%">
+          <div className="relative h-56 w-full min-w-0 my-2">
+            <ResponsiveContainer width="100%" height={224} minWidth={0}>
               <PieChart>
                 <Pie
                   data={pieChartData}
@@ -904,6 +908,6 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
           </table>
         </div>
       </section>
-    </motion.div>
+    </div>
   );
 };

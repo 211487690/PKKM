@@ -10,8 +10,10 @@ if (session_status() === PHP_SESSION_NONE) {
 
 $action = $_GET['action'] ?? ($_POST['action'] ?? '');
 
+$requestPath = parse_url((string)($_SERVER['REQUEST_URI'] ?? '/'), PHP_URL_PATH) ?: '/';
+
 // Serve static logo if routed through PHP
-if (($_SERVER['REQUEST_URI'] ?? '') === '/assets/logo-mia-06.png') {
+if ($requestPath === '/assets/logo-mia-06.png') {
     $logoFile = __DIR__ . '/../assets/logo-mia-06.png';
     if (is_file($logoFile)) {
         header('Content-Type: image/png');
@@ -20,6 +22,17 @@ if (($_SERVER['REQUEST_URI'] ?? '') === '/assets/logo-mia-06.png') {
     }
 }
 
+function safeRedirectPath(?string $raw, string $fallback = '/'): string
+{
+    $target = trim((string)($raw ?? ''));
+    if ($target === '' || !str_starts_with($target, '/') || str_starts_with($target, '//')) {
+        return $fallback;
+    }
+    return $target;
+}
+
+$isHttps = (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off')
+    || (($_SERVER['HTTP_X_FORWARDED_PROTO'] ?? '') === 'https');
 $authSecret = hash('sha256', 'sip-pkkm-2026-almaarif06-secret-' . (getenv('DB_PASS') ?: 'local'));
 $expectedAuthCookie = hash_hmac('sha256', 'admin', $authSecret);
 $isAuthenticated = (!empty($_SESSION['pkkm_auth']) && $_SESSION['pkkm_auth'] === 'admin')
@@ -29,20 +42,32 @@ $loginError = '';
 
 if ($action === 'logout') {
     unset($_SESSION['pkkm_auth']);
-    setcookie('pkkm_auth', '', time() - 3600, '/');
+    setcookie('pkkm_auth', '', [
+        'expires' => time() - 3600,
+        'path' => '/',
+        'secure' => $isHttps,
+        'httponly' => true,
+        'samesite' => 'Lax',
+    ]);
     header('Location: /');
     exit;
 }
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && $action === 'login') {
-    $inputUser = trim((string)($_POST['username'] ?? ''));
+    $inputUser = strtolower(trim((string)($_POST['username'] ?? '')));
     $inputPass = (string)($_POST['password'] ?? '');
     $passDigest = hash('sha256', $inputPass);
     $expectedDigest = '240be518fabd2724ddb6f04eeb1da5967448d7e831c08c8fa822809f74c720a9';
 
     if ($inputUser === 'admin' && hash_equals($expectedDigest, $passDigest)) {
         $_SESSION['pkkm_auth'] = 'admin';
-        setcookie('pkkm_auth', $expectedAuthCookie, time() + 86400 * 7, '/');
+        setcookie('pkkm_auth', $expectedAuthCookie, [
+            'expires' => time() + 86400 * 7,
+            'path' => '/',
+            'secure' => $isHttps,
+            'httponly' => true,
+            'samesite' => 'Lax',
+        ]);
         header('Location: /');
         exit;
     }
@@ -50,7 +75,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $action === 'login') {
 }
 
 if (!$isAuthenticated) {
-    require_once __DIR__ . '/helpers.php';
     require __DIR__ . '/../views/login.php';
     exit;
 }
@@ -72,7 +96,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $_SESSION['active_user_id'] = $newUserId;
             setcookie('pkkm_user_id', $newUserId, time() + 86400 * 30, '/');
         }
-        $redirect = $_POST['redirect'] ?? '/';
+        $redirect = safeRedirectPath($_POST['redirect'] ?? '/');
         header('Location: ' . $redirect);
         exit;
     }
@@ -187,7 +211,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             echo json_encode(['ok' => true]);
             exit;
         }
-        header('Location: ' . ($_POST['redirect'] ?? '/?page=notifikasi'));
+        header('Location: ' . safeRedirectPath($_POST['redirect'] ?? '/?page=notifikasi', '/?page=notifikasi'));
         exit;
     }
 
@@ -219,16 +243,28 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 );
             }
         }
-        header('Location: ' . ($_POST['redirect'] ?? '/'));
+        header('Location: ' . safeRedirectPath($_POST['redirect'] ?? '/'));
         exit;
     }
 
     if ($action === 'bulk_archive_completed') {
         if ((int)$activeUser['is_admin'] === 1) {
+            $firstInd = $pdo->query("SELECT id FROM indicators WHERE status = 'disetorkan' AND is_archived = 0 LIMIT 1")->fetchColumn();
             $stmt = $pdo->prepare("UPDATE indicators SET is_archived = 1, archived_by = ?, archived_at = NOW() WHERE status = 'disetorkan' AND is_archived = 0");
             $stmt->execute([$activeUser['id']]);
+            $count = $stmt->rowCount();
+            if ($count > 0 && $firstInd) {
+                dispatchRelevantNotification(
+                    $pdo,
+                    $activeUser,
+                    (string)$firstInd,
+                    'archive_update',
+                    sprintf('%d Indikator Selesai Diarsipkan', $count),
+                    sprintf('%s memindahkan %d indikator yang sudah disetorkan ke Area Arsip.', $activeUser['name'], $count)
+                );
+            }
         }
-        header('Location: ' . ($_POST['redirect'] ?? '/'));
+        header('Location: ' . safeRedirectPath($_POST['redirect'] ?? '/'));
         exit;
     }
 }

@@ -1,11 +1,8 @@
 -- Skema Database MySQL untuk SIP-PKKM 2026 MIS ALMAARIF 06 TOYOMARTO
 -- Jalankan file ini terlebih dahulu sebelum database/seed.sql
-
-CREATE DATABASE IF NOT EXISTS `pkkm_almaarif06`
-  CHARACTER SET utf8mb4
-  COLLATE utf8mb4_unicode_ci;
-
-USE `pkkm_almaarif06`;
+-- Catatan: Jika menggunakan MySQL lokal, aktifkan 2 baris berikut. Untuk Cloud MySQL (TiDB/Aiven/Railway), langsung pilih database target Anda.
+-- CREATE DATABASE IF NOT EXISTS `pkkm_almaarif06` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+-- USE `pkkm_almaarif06`;
 
 DROP TABLE IF EXISTS `notification_reads`;
 DROP TABLE IF EXISTS `notifications`;
