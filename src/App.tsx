@@ -87,12 +87,48 @@ export default function App() {
   }, []);
 
   const loadState = useCallback(async () => {
+    const BACKUP_KEY = 'pkkm_state_backup_v1';
     try {
       const res = await fetch('/api/state');
       if (res.ok) {
         const data = await res.json();
-        setProgressMap(data.progress || {});
-        setNotifications(data.notifications || []);
+        const serverProgress: Record<string, IndicatorProgress> = data.progress || {};
+        const serverNotifs: ProgressNotification[] = data.notifications || [];
+
+        const serverHasEdits = Object.values(serverProgress).some(
+          (p) => p.updatedBy || p.status !== 'belum' || p.checkedSubItems.length > 0 || p.archived
+        );
+
+        const rawBackup = localStorage.getItem(BACKUP_KEY);
+        if (!serverHasEdits && rawBackup) {
+          try {
+            const parsed = JSON.parse(rawBackup) as {
+              progress?: Record<string, IndicatorProgress>;
+              notifications?: ProgressNotification[];
+            };
+            const backupHasEdits = parsed.progress && Object.values(parsed.progress).some(
+              (p) => p.updatedBy || p.status !== 'belum' || p.checkedSubItems.length > 0 || p.archived
+            );
+            if (backupHasEdits) {
+              const syncRes = await fetch('/api/state/restore', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(parsed),
+              });
+              if (syncRes.ok) {
+                const synced = await syncRes.json();
+                setProgressMap(synced.progress || parsed.progress);
+                setNotifications(synced.notifications || parsed.notifications || serverNotifs);
+                return;
+              }
+            }
+          } catch {
+            // Ignore invalid backup
+          }
+        }
+
+        setProgressMap(serverProgress);
+        setNotifications(serverNotifs);
       }
     } finally {
       setLoading(false);
@@ -104,6 +140,19 @@ export default function App() {
       loadState();
     }
   }, [authUser, loadState]);
+
+  useEffect(() => {
+    if (!loading && Object.keys(progressMap).length > 0) {
+      try {
+        localStorage.setItem(
+          'pkkm_state_backup_v1',
+          JSON.stringify({ progress: progressMap, notifications })
+        );
+      } catch {
+        // Ignore storage quota errors
+      }
+    }
+  }, [loading, progressMap, notifications]);
 
   const handleLoginSuccess = (token: string, user: { username: string; name: string }) => {
     localStorage.setItem(AUTH_TOKEN_KEY, token);
