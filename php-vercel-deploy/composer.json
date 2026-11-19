@@ -1,0 +1,10 @@
+{
+  "name": "mi-almaarif-06/sip-pkkm-2026",
+  "description": "Sistem Ceklist Bukti Fisik & Progres Visitasi PKKM Level 4 Tahun 2026 MIS Almaarif 06 Toyomarto (PHP Native PDO + MySQL + Tailwind CSS)",
+  "type": "project",
+  "require": {
+    "php": ">=8.1",
+    "ext-pdo": "*",
+    "ext-pdo_mysql": "*"
+  }
+}
