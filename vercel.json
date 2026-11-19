@@ -2,13 +2,17 @@
   "buildCommand": "npm run build",
   "outputDirectory": "dist",
   "functions": {
-    "api/[...slug].ts": {
+    "api/index.js": {
       "includeFiles": "php-vercel-deploy/**"
     }
   },
   "rewrites": [
     {
-      "source": "/((?!api/|assets/).*)",
+      "source": "/api/(.*)",
+      "destination": "/api/index"
+    },
+    {
+      "source": "/(.*)",
       "destination": "/index.html"
     }
   ]
