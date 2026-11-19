@@ -29,6 +29,14 @@ import { TeamPicView } from './components/TeamPicView';
 import { NotificationsView } from './components/NotificationsView';
 import { PhpDeployView } from './components/PhpDeployView';
 import { LoginView } from './components/LoginView';
+import {
+  apiArchiveIndicator,
+  apiLoadState,
+  apiLogout,
+  apiMarkNotificationsRead,
+  apiUpdateIndicator,
+  apiVerifySession,
+} from './utils/pkkmClient';
 
 const AUTH_TOKEN_KEY = 'pkkm_auth_token';
 
@@ -59,22 +67,10 @@ export default function App() {
   useEffect(() => {
     let cancelled = false;
     const verifySession = async () => {
-      const token = localStorage.getItem(AUTH_TOKEN_KEY);
-      if (!token) {
-        if (!cancelled) setAuthChecking(false);
-        return;
-      }
       try {
-        const res = await fetch('/api/auth/me', {
-          headers: { Authorization: `Bearer ${token}` },
-        });
-        if (res.ok) {
-          const data = await res.json();
-          if (!cancelled && data.authenticated) {
-            setAuthUser(data.user);
-          }
-        } else {
-          localStorage.removeItem(AUTH_TOKEN_KEY);
+        const user = await apiVerifySession();
+        if (!cancelled && user) {
+          setAuthUser(user);
         }
       } finally {
         if (!cancelled) setAuthChecking(false);
@@ -87,49 +83,10 @@ export default function App() {
   }, []);
 
   const loadState = useCallback(async () => {
-    const BACKUP_KEY = 'pkkm_state_backup_v1';
     try {
-      const res = await fetch('/api/state');
-      if (res.ok) {
-        const data = await res.json();
-        const serverProgress: Record<string, IndicatorProgress> = data.progress || {};
-        const serverNotifs: ProgressNotification[] = data.notifications || [];
-
-        const serverHasEdits = Object.values(serverProgress).some(
-          (p) => p.updatedBy || p.status !== 'belum' || p.checkedSubItems.length > 0 || p.archived
-        );
-
-        const rawBackup = localStorage.getItem(BACKUP_KEY);
-        if (!serverHasEdits && rawBackup) {
-          try {
-            const parsed = JSON.parse(rawBackup) as {
-              progress?: Record<string, IndicatorProgress>;
-              notifications?: ProgressNotification[];
-            };
-            const backupHasEdits = parsed.progress && Object.values(parsed.progress).some(
-              (p) => p.updatedBy || p.status !== 'belum' || p.checkedSubItems.length > 0 || p.archived
-            );
-            if (backupHasEdits) {
-              const syncRes = await fetch('/api/state/restore', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(parsed),
-              });
-              if (syncRes.ok) {
-                const synced = await syncRes.json();
-                setProgressMap(synced.progress || parsed.progress);
-                setNotifications(synced.notifications || parsed.notifications || serverNotifs);
-                return;
-              }
-            }
-          } catch {
-            // Ignore invalid backup
-          }
-        }
-
-        setProgressMap(serverProgress);
-        setNotifications(serverNotifs);
-      }
+      const data = await apiLoadState();
+      setProgressMap(data.progress || {});
+      setNotifications(data.notifications || []);
     } finally {
       setLoading(false);
     }
@@ -141,19 +98,6 @@ export default function App() {
     }
   }, [authUser, loadState]);
 
-  useEffect(() => {
-    if (!loading && Object.keys(progressMap).length > 0) {
-      try {
-        localStorage.setItem(
-          'pkkm_state_backup_v1',
-          JSON.stringify({ progress: progressMap, notifications })
-        );
-      } catch {
-        // Ignore storage quota errors
-      }
-    }
-  }, [loading, progressMap, notifications]);
-
   const handleLoginSuccess = (token: string, user: { username: string; name: string }) => {
     localStorage.setItem(AUTH_TOKEN_KEY, token);
     setAuthUser(user);
@@ -161,8 +105,7 @@ export default function App() {
   };
 
   const handleLogout = async () => {
-    localStorage.removeItem(AUTH_TOKEN_KEY);
-    await fetch('/api/auth/logout', { method: 'POST' }).catch(() => {});
+    await apiLogout();
     setAuthUser(null);
     setActiveTab('dashboard');
   };
@@ -209,17 +152,12 @@ export default function App() {
       subItemIndex?: number;
     }
   ) => {
-    const res = await fetch(`/api/progress/${encodeURIComponent(indicatorId)}`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        ...payload,
-        actorId: activeUserId,
-      }),
+    const data = await apiUpdateIndicator(indicatorId, {
+      ...payload,
+      actorId: activeUserId,
     });
 
-    if (res.ok) {
-      const data = await res.json();
+    if (data) {
       setProgressMap((prev) => ({
         ...prev,
         [indicatorId]: data.progress,
@@ -241,32 +179,19 @@ export default function App() {
   };
 
   const handleMarkRead = async (notificationId?: string) => {
-    const res = await fetch('/api/notifications/read', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        userId: activeUserId,
-        notificationId,
-      }),
-    });
-    if (res.ok) {
-      const data = await res.json();
-      setNotifications(data.notifications || []);
+    const nextNotifs = await apiMarkNotificationsRead(activeUserId, notificationId);
+    if (nextNotifs) {
+      setNotifications(nextNotifs);
     }
   };
 
   const handleArchiveIndicator = async (indicatorId: string, archived: boolean) => {
-    const res = await fetch('/api/archive', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        indicatorId,
-        archived,
-        actorId: activeUserId,
-      }),
+    const data = await apiArchiveIndicator({
+      indicatorId,
+      archived,
+      actorId: activeUserId,
     });
-    if (res.ok) {
-      const data = await res.json();
+    if (data) {
       setProgressMap(data.progress || {});
       setNotifications(data.notifications || []);
       showToast(
@@ -278,16 +203,11 @@ export default function App() {
   };
 
   const handleBulkArchiveCompleted = async () => {
-    const res = await fetch('/api/archive', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        bulkCompleted: true,
-        actorId: activeUserId,
-      }),
+    const data = await apiArchiveIndicator({
+      bulkCompleted: true,
+      actorId: activeUserId,
     });
-    if (res.ok) {
-      const data = await res.json();
+    if (data) {
       setProgressMap(data.progress || {});
       setNotifications(data.notifications || []);
       const count = data.archivedCount ?? 0;

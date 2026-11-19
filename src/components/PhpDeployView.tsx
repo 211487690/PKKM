@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from 'react';
+import JSZip from 'jszip';
 import { Check, Copy, Download, FileCode2, FolderGit2, Server } from 'lucide-react';
 
 interface PhpFileEntry {
@@ -6,29 +7,68 @@ interface PhpFileEntry {
   content: string;
 }
 
+const staticPhpRawModules = import.meta.glob(
+  [
+    '/php-vercel-deploy/**/*.php',
+    '/php-vercel-deploy/**/*.sql',
+    '/php-vercel-deploy/**/*.json',
+    '/php-vercel-deploy/**/*.md',
+    '/php-vercel-deploy/.env.example',
+    '/php-vercel-deploy/.gitignore',
+  ],
+  { query: '?raw', import: 'default' }
+) as Record<string, () => Promise<string>>;
+
 export const PhpDeployView: React.FC = () => {
   const [files, setFiles] = useState<PhpFileEntry[]>([]);
   const [selectedPath, setSelectedPath] = useState<string>('');
   const [loading, setLoading] = useState<boolean>(true);
   const [copied, setCopied] = useState<boolean>(false);
+  const [downloadingZip, setDownloadingZip] = useState<boolean>(false);
 
   useEffect(() => {
     let active = true;
-    fetch('/api/php-files')
-      .then((r) => r.json())
-      .then((data) => {
-        if (!active) return;
-        const list: PhpFileEntry[] = data.files || [];
-        setFiles(list);
-        if (list.length > 0) {
-          const preferred = list.find((f) => f.path === 'vercel.json') ?? list[0];
-          setSelectedPath(preferred.path);
+
+    const loadFiles = async () => {
+      try {
+        const res = await fetch('/api/php-files');
+        const ct = res.headers.get('content-type') || '';
+        if (res.ok && ct.includes('application/json')) {
+          const data = await res.json();
+          if (active && Array.isArray(data.files) && data.files.length > 0) {
+            setFiles(data.files);
+            const preferred =
+              data.files.find((f: PhpFileEntry) => f.path === 'vercel.json') ?? data.files[0];
+            setSelectedPath(preferred.path);
+            setLoading(false);
+            return;
+          }
         }
-        setLoading(false);
-      })
-      .catch(() => {
+      } catch {
+        // Fallback to static Vite bundled files
+      }
+
+      try {
+        const entries = await Promise.all(
+          Object.entries(staticPhpRawModules).map(async ([fullPath, loader]) => ({
+            path: fullPath.replace(/^\/php-vercel-deploy\//, ''),
+            content: await loader(),
+          }))
+        );
+        entries.sort((a, b) => a.path.localeCompare(b.path));
+        if (active) {
+          setFiles(entries);
+          if (entries.length > 0) {
+            const preferred = entries.find((f) => f.path === 'vercel.json') ?? entries[0];
+            setSelectedPath(preferred.path);
+          }
+        }
+      } finally {
         if (active) setLoading(false);
-      });
+      }
+    };
+
+    loadFiles();
     return () => {
       active = false;
     };
@@ -41,6 +81,51 @@ export const PhpDeployView: React.FC = () => {
     await navigator.clipboard.writeText(currentFile.content);
     setCopied(true);
     setTimeout(() => setCopied(false), 1800);
+  };
+
+  const handleDownloadZip = async () => {
+    setDownloadingZip(true);
+    try {
+      const res = await fetch('/api/download-php-zip');
+      const ct = res.headers.get('content-type') || '';
+      if (res.ok && ct.includes('application/zip')) {
+        const blob = await res.blob();
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = 'sip-pkkm-2026-php-pdo-vercel.zip';
+        a.click();
+        URL.revokeObjectURL(url);
+        return;
+      }
+    } catch {
+      // Fall back to client-side JSZip bundle
+    }
+
+    try {
+      const zip = new JSZip();
+      for (const f of files) {
+        zip.file(f.path, f.content);
+      }
+      try {
+        const logoRes = await fetch('/assets/aistudio/LOGO_MIA_06_23b19dba.png');
+        if (logoRes.ok) {
+          const logoBuf = await logoRes.arrayBuffer();
+          zip.file('assets/logo-mia-06.png', logoBuf);
+        }
+      } catch {
+        // Optional logo asset
+      }
+      const blob = await zip.generateAsync({ type: 'blob', compression: 'DEFLATE' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = 'sip-pkkm-2026-php-pdo-vercel.zip';
+      a.click();
+      URL.revokeObjectURL(url);
+    } finally {
+      setDownloadingZip(false);
+    }
   };
 
   return (
@@ -59,14 +144,15 @@ export const PhpDeployView: React.FC = () => {
           </p>
         </div>
 
-        <a
-          href="/api/download-php-zip"
-          download="sip-pkkm-2026-php-pdo-vercel.zip"
-          className="inline-flex items-center justify-center gap-2 px-5 py-2.5 text-sm font-semibold bg-teal-700 text-white rounded-lg hover:bg-teal-800 whitespace-nowrap shrink-0"
+        <button
+          type="button"
+          disabled={downloadingZip || loading}
+          onClick={handleDownloadZip}
+          className="inline-flex items-center justify-center gap-2 px-5 py-2.5 text-sm font-semibold bg-teal-700 text-white rounded-lg hover:bg-teal-800 disabled:opacity-60 whitespace-nowrap shrink-0"
         >
           <Download className="w-4 h-4" />
-          <span>Unduh Paket ZIP Siap Deploy</span>
-        </a>
+          <span>{downloadingZip ? 'Menyiapkan ZIP...' : 'Unduh Paket ZIP Siap Deploy'}</span>
+        </button>
       </section>
 
       {/* Ringkasan Langkah GitHub & Vercel */}

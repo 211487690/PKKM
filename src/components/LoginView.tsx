@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { motion } from 'motion/react';
 import { Eye, EyeOff, Lock, LogIn, ShieldCheck, User } from 'lucide-react';
 import { MADRASAH_INFO } from '../data/pkkmData';
+import { apiLogin } from '../utils/pkkmClient';
 
 interface LoginViewProps {
   onLoginSuccess: (token: string, user: { username: string; name: string }) => void;
@@ -25,24 +26,14 @@ export const LoginView: React.FC<LoginViewProps> = ({ onLoginSuccess }) => {
 
     setSubmitting(true);
     try {
-      const res = await fetch('/api/auth/login', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          username: username.trim(),
-          password,
-        }),
-      });
-
-      const data = await res.json();
-      if (!res.ok) {
-        setErrorMsg(data.error || 'Username atau password tidak valid.');
+      const result = await apiLogin(username, password);
+      if (!result.ok) {
+        setErrorMsg(result.error);
         return;
       }
-
-      onLoginSuccess(data.token, data.user);
+      onLoginSuccess(result.token, result.user);
     } catch {
-      setErrorMsg('Gagal menghubungi server autentikasi. Silakan coba lagi.');
+      setErrorMsg('Gagal memproses login. Silakan coba lagi.');
     } finally {
       setSubmitting(false);
     }
