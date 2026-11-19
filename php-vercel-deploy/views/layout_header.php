@@ -18,10 +18,15 @@
 
   <!-- Sidebar Navigasi: Hijau Tosca & Abu-abu · Setiap Komponen Menu Tersendiri -->
   <aside class="w-full lg:w-72 bg-gradient-to-b from-teal-900 via-teal-950 to-slate-800 text-slate-100 border-b lg:border-b-0 lg:border-r border-slate-700/60 flex flex-col shrink-0">
-    <div class="p-5 border-b border-teal-800/70 bg-teal-950/40">
-      <div class="text-[11px] font-semibold text-teal-300 tracking-wider">MIS ALMAARIF 06 TOYOMARTO</div>
-      <div class="font-display text-lg font-bold text-white mt-0.5 tracking-wide">SIP-PKKM 2026</div>
-      <div class="text-xs text-slate-300 mt-1">Instrumen Level 4 · 89 Indikator</div>
+    <div class="p-5 border-b border-teal-800/70 bg-teal-950/40 flex items-center gap-3">
+      <div class="w-11 h-11 rounded-lg bg-white p-1 shrink-0 flex items-center justify-center border border-teal-400/30">
+        <img src="/assets/logo-mia-06.png" alt="Logo MI Almaarif 06" class="w-full h-full object-contain" />
+      </div>
+      <div class="min-w-0">
+        <div class="text-[10px] font-semibold text-teal-300 tracking-wider truncate">MIS ALMAARIF 06 TOYOMARTO</div>
+        <div class="font-display text-base font-bold text-white mt-0.5 tracking-wide truncate">SIP-PKKM 2026</div>
+        <div class="text-[11px] text-slate-300">Instrumen Level 4 · 89 Indikator</div>
+      </div>
     </div>
 
     <nav class="p-3 space-y-1 flex-1 overflow-y-auto">
@@ -100,6 +105,9 @@
         </a>
         <a href="/?action=export_csv" class="px-4 py-2 text-xs font-semibold bg-teal-700 text-white rounded-lg hover:bg-teal-800 whitespace-nowrap">
           Ekspor CSV
+        </a>
+        <a href="/?action=logout" class="px-3 py-1.5 text-xs font-medium border border-slate-200 rounded-lg hover:bg-slate-50 text-slate-700 whitespace-nowrap">
+          Keluar
         </a>
       </div>
     </header>

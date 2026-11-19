@@ -20,6 +20,7 @@ import {
   CheckCircle2,
   Clock,
   FileCheck2,
+  FileDown,
   FolderOpen,
   Users,
 } from 'lucide-react';
@@ -30,6 +31,7 @@ import {
   PIC_USERS,
   type IndicatorProgress,
 } from '../data/pkkmData';
+import { generatePkkmPdfReport } from '../utils/pdfReport';
 
 interface DashboardViewProps {
   progressMap: Record<string, IndicatorProgress>;
@@ -77,6 +79,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
   const [archiveTab, setArchiveTab] = useState<'active' | 'archived'>('active');
   const [archiveCompFilter, setArchiveCompFilter] = useState<number>(0);
   const [busyId, setBusyId] = useState<string | null>(null);
+  const [exportingPdf, setExportingPdf] = useState<boolean>(false);
 
   useEffect(() => {
     const timer = setInterval(() => setNowMs(Date.now()), 1000);
@@ -192,6 +195,15 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
     }
   };
 
+  const handleDownloadPdf = async () => {
+    setExportingPdf(true);
+    try {
+      await generatePkkmPdfReport(progressMap);
+    } finally {
+      setExportingPdf(false);
+    }
+  };
+
   return (
     <motion.div
       initial={{ opacity: 0, y: 8 }}
@@ -199,35 +211,61 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
       transition={{ duration: 0.22, ease: [0.16, 1, 0.3, 1] }}
       className="space-y-6"
     >
-      {/* Identitas Lembaga & Countdown Deadline 3 Desember 2026 */}
+      {/* Identitas Lembaga, Logo & Countdown Deadline 3 Desember 2026 */}
       <section className="bg-white border border-slate-200 rounded-xl p-6">
         <div className="flex flex-col xl:flex-row xl:items-center xl:justify-between gap-6">
-          <div className="space-y-2 max-w-2xl">
-            <div className="flex flex-wrap items-center gap-2 text-xs text-teal-700 font-semibold">
-              <span>Lembar Kendali &amp; Ceklist Bukti Fisik Visitasi PKKM</span>
-              <span aria-hidden="true" className="text-slate-300">·</span>
-              <span>{MADRASAH_INFO.fokusBuktiFisik}</span>
+          <div className="flex flex-col sm:flex-row sm:items-center gap-4 max-w-2xl">
+            <div className="w-16 h-16 sm:w-20 sm:h-20 rounded-xl bg-slate-50 border border-slate-200 p-1.5 shrink-0 flex items-center justify-center">
+              <img
+                src="/assets/aistudio/LOGO_MIA_06_23b19dba.png"
+                alt="Logo MIS Almaarif 06 Toyomarto"
+                className="w-full h-full object-contain"
+              />
             </div>
-            <h1 className="font-display text-2xl sm:text-3xl font-bold text-slate-900 tracking-tight text-balance">
-              {MADRASAH_INFO.namaMadrasah}
-            </h1>
-            <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-slate-600">
-              <span>
-                NSM/NPSN:{' '}
-                <strong className="font-mono text-slate-900">
-                  {MADRASAH_INFO.nsm} / {MADRASAH_INFO.npsn}
-                </strong>
-              </span>
-              <span aria-hidden="true" className="text-slate-300">·</span>
-              <span>
-                Kepala Madrasah:{' '}
-                <strong className="text-slate-900">{MADRASAH_INFO.kepalaMadrasah}</strong>
-              </span>
-              <span aria-hidden="true" className="text-slate-300">·</span>
-              <span>
-                Pengawas:{' '}
-                <strong className="text-slate-900">{MADRASAH_INFO.pengawasPembina}</strong>
-              </span>
+
+            <div className="space-y-2 min-w-0">
+              <div className="flex flex-wrap items-center gap-2 text-xs text-teal-700 font-semibold">
+                <span>Lembar Kendali &amp; Ceklist Bukti Fisik Visitasi PKKM</span>
+                <span aria-hidden="true" className="text-slate-300">·</span>
+                <span>{MADRASAH_INFO.fokusBuktiFisik}</span>
+              </div>
+              <h1 className="font-display text-2xl sm:text-3xl font-bold text-slate-900 tracking-tight text-balance">
+                {MADRASAH_INFO.namaMadrasah}
+              </h1>
+              <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-slate-600">
+                <span>
+                  NSM/NPSN:{' '}
+                  <strong className="font-mono text-slate-900">
+                    {MADRASAH_INFO.nsm} / {MADRASAH_INFO.npsn}
+                  </strong>
+                </span>
+                <span aria-hidden="true" className="text-slate-300">·</span>
+                <span>
+                  Kepala Madrasah:{' '}
+                  <strong className="text-slate-900">{MADRASAH_INFO.kepalaMadrasah}</strong>
+                </span>
+                <span aria-hidden="true" className="text-slate-300">·</span>
+                <span>
+                  Pengawas:{' '}
+                  <strong className="text-slate-900">{MADRASAH_INFO.pengawasPembina}</strong>
+                </span>
+              </div>
+
+              <div className="pt-1">
+                <button
+                  type="button"
+                  disabled={exportingPdf}
+                  onClick={handleDownloadPdf}
+                  className="inline-flex items-center gap-2 px-4 py-2 text-xs font-semibold bg-teal-700 text-white rounded-lg hover:bg-teal-800 disabled:opacity-60 transition-colors"
+                >
+                  <FileDown className="w-4 h-4 shrink-0" />
+                  <span>
+                    {exportingPdf
+                      ? 'Menyiapkan Laporan PDF...'
+                      : 'Unduh Laporan Rekapitulasi (PDF)'}
+                  </span>
+                </button>
+              </div>
             </div>
           </div>
 

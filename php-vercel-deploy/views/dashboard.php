@@ -51,18 +51,60 @@ $focusSql .= " ORDER BY component_id ASC, no ASC";
 $focusStmt = $pdo->prepare($focusSql);
 $focusStmt->execute($focusParams);
 $focusRows = $focusStmt->fetchAll();
+$pdfSummaryRows = [];
+foreach ($componentsSummary as $cs) {
+    $tot = (int)$cs['total_count'];
+    $dn = (int)$cs['disetorkan_count'];
+    $pdfSummaryRows[] = [
+        'K' . (int)$cs['id'],
+        $cs['title'],
+        (string)(int)$cs['max_score'],
+        (string)$tot,
+        (string)$dn,
+        (string)(int)$cs['proses_count'],
+        (string)(int)$cs['belum_count'],
+        (int)$cs['checked_subitems'] . '/' . (int)$cs['total_subitems'],
+        ($tot > 0 ? round(($dn / $tot) * 100) : 0) . '%',
+    ];
+}
+
+$allPdfDetailRows = $pdo->query("
+    SELECT i.component_id, i.no, i.indikator_kinerja, i.raw_keterangan, i.status, i.lokasi_berkas, i.is_archived,
+           (SELECT COUNT(*) FROM bukti_fisik_items b WHERE b.indicator_id = i.id) AS total_b,
+           (SELECT COUNT(*) FROM bukti_fisik_items b WHERE b.indicator_id = i.id AND b.is_checked = 1) AS done_b
+    FROM indicators i
+    ORDER BY i.component_id ASC, i.no ASC
+")->fetchAll();
+$pdfDetailPayload = array_map(fn($r) => [
+    'K' . (int)$r['component_id'] . ' #' . (int)$r['no'],
+    $r['indikator_kinerja'],
+    $r['raw_keterangan'],
+    ($r['status'] === 'disetorkan' ? 'Disetorkan' : ($r['status'] === 'proses' ? 'Proses' : 'Belum')) . ((int)$r['is_archived'] === 1 ? ' [Arsip]' : ''),
+    (int)$r['done_b'] . '/' . (int)$r['total_b'],
+    $r['lokasi_berkas'] !== '' ? $r['lokasi_berkas'] : '-',
+], $allPdfDetailRows);
 ?>
 
 <div class="space-y-6">
-  <!-- Header Lembaga + Countdown Deadline 3 Desember 2026 -->
+  <!-- Header Lembaga + Logo + Countdown Deadline 3 Desember 2026 -->
   <div class="bg-white border border-slate-200 rounded-xl p-6">
     <div class="flex flex-col xl:flex-row xl:items-center xl:justify-between gap-6">
-      <div>
-        <div class="text-xs font-semibold text-teal-700">LEMBAR KENDALI &amp; CEKLIST BUKTI FISIK VISITASI PKKM</div>
-        <h1 class="font-display text-2xl font-bold text-slate-900 mt-1">MIS ALMAARIF 06 TOYOMARTO · PKKM 2026</h1>
-        <p class="text-xs text-slate-600 mt-1">
-          NSM/NPSN: <strong class="font-mono">111235070217 / 60715202</strong> · Kepala Madrasah: <strong>Ahmad Syaikhu, S.Pd.I</strong> · Pengawas: <strong>DRA. DIYAH SURYANINGSIH, M.Pd</strong>
-        </p>
+      <div class="flex flex-col sm:flex-row sm:items-center gap-4">
+        <div class="w-16 h-16 sm:w-20 sm:h-20 rounded-xl bg-slate-50 border border-slate-200 p-1.5 shrink-0 flex items-center justify-center">
+          <img src="/assets/logo-mia-06.png" alt="Logo MIS Almaarif 06 Toyomarto" class="w-full h-full object-contain" />
+        </div>
+        <div>
+          <div class="text-xs font-semibold text-teal-700">LEMBAR KENDALI &amp; CEKLIST BUKTI FISIK VISITASI PKKM</div>
+          <h1 class="font-display text-2xl font-bold text-slate-900 mt-1">MIS ALMAARIF 06 TOYOMARTO · PKKM 2026</h1>
+          <p class="text-xs text-slate-600 mt-1">
+            NSM/NPSN: <strong class="font-mono">111235070217 / 60715202</strong> · Kepala Madrasah: <strong>Ahmad Syaikhu, S.Pd.I</strong> · Pengawas: <strong>DRA. DIYAH SURYANINGSIH, M.Pd</strong>
+          </p>
+          <div class="mt-3">
+            <button type="button" id="btn-download-pdf" class="px-4 py-2 text-xs font-semibold bg-teal-700 text-white rounded-lg hover:bg-teal-800">
+              Unduh Laporan Rekapitulasi (PDF)
+            </button>
+          </div>
+        </div>
       </div>
 
       <div class="bg-slate-900 text-white rounded-xl p-4 shrink-0 border border-slate-800">
@@ -284,6 +326,8 @@ $focusRows = $focusStmt->fetchAll();
 </div>
 
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/jspdf-autotable@3.8.2/dist/jspdf.plugin.autotable.min.js"></script>
 <script>
   (function() {
     const deadline = new Date('2026-12-03T23:59:59+07:00').getTime();
@@ -298,6 +342,33 @@ $focusRows = $focusStmt->fetchAll();
     }
     updateCountdown();
     setInterval(updateCountdown, 1000);
+
+    const pdfBtn = document.getElementById('btn-download-pdf');
+    if (pdfBtn && window.jspdf) {
+      pdfBtn.addEventListener('click', async function() {
+        const { jsPDF } = window.jspdf;
+        const doc = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
+        doc.setFont('helvetica', 'bold');
+        doc.setFontSize(13);
+        doc.text('MIS ALMAARIF 06 TOYOMARTO - LAPORAN REKAPITULASI PKKM 2026', 14, 18);
+        doc.setFont('helvetica', 'normal');
+        doc.setFontSize(8.5);
+        doc.text('NSM: 111235070217 | NPSN: 60715202 | Capaian Global: <?= $pctGlobal ?>% (<?= $totalDisetorkan ?>/<?= $totalInd ?> Butir)', 14, 24);
+        doc.autoTable({
+          startY: 29,
+          head: [['Kode', 'Komponen', 'Skor', 'Butir', 'Disetorkan', 'Proses', 'Belum', 'Bukti Fisik', 'Capaian']],
+          body: <?= json_encode($pdfSummaryRows) ?>,
+          styles: { fontSize: 8 }
+        });
+        doc.autoTable({
+          startY: doc.lastAutoTable.finalY + 8,
+          head: [['Butir', 'Indikator Kinerja', 'PIC', 'Status', 'Bukti', 'Lokasi Berkas']],
+          body: <?= json_encode($pdfDetailPayload) ?>,
+          styles: { fontSize: 7 }
+        });
+        doc.save('Laporan-Rekap-PKKM-2026-MI-Almaarif-06.pdf');
+      });
+    }
 
     new Chart(document.getElementById('barChartPkkm'), {
       type: 'bar',

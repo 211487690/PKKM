@@ -8,12 +8,57 @@ if (session_status() === PHP_SESSION_NONE) {
     @session_start();
 }
 
+$action = $_GET['action'] ?? ($_POST['action'] ?? '');
+
+// Serve static logo if routed through PHP
+if (($_SERVER['REQUEST_URI'] ?? '') === '/assets/logo-mia-06.png') {
+    $logoFile = __DIR__ . '/../assets/logo-mia-06.png';
+    if (is_file($logoFile)) {
+        header('Content-Type: image/png');
+        readfile($logoFile);
+        exit;
+    }
+}
+
+$authSecret = hash('sha256', 'sip-pkkm-2026-almaarif06-secret-' . (getenv('DB_PASS') ?: 'local'));
+$expectedAuthCookie = hash_hmac('sha256', 'admin', $authSecret);
+$isAuthenticated = (!empty($_SESSION['pkkm_auth']) && $_SESSION['pkkm_auth'] === 'admin')
+    || (isset($_COOKIE['pkkm_auth']) && hash_equals($expectedAuthCookie, (string)$_COOKIE['pkkm_auth']));
+
+$loginError = '';
+
+if ($action === 'logout') {
+    unset($_SESSION['pkkm_auth']);
+    setcookie('pkkm_auth', '', time() - 3600, '/');
+    header('Location: /');
+    exit;
+}
+
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && $action === 'login') {
+    $inputUser = trim((string)($_POST['username'] ?? ''));
+    $inputPass = (string)($_POST['password'] ?? '');
+    $passDigest = hash('sha256', $inputPass);
+    $expectedDigest = '240be518fabd2724ddb6f04eeb1da5967448d7e831c08c8fa822809f74c720a9';
+
+    if ($inputUser === 'admin' && hash_equals($expectedDigest, $passDigest)) {
+        $_SESSION['pkkm_auth'] = 'admin';
+        setcookie('pkkm_auth', $expectedAuthCookie, time() + 86400 * 7, '/');
+        header('Location: /');
+        exit;
+    }
+    $loginError = 'Username atau password tidak sesuai.';
+}
+
+if (!$isAuthenticated) {
+    require_once __DIR__ . '/helpers.php';
+    require __DIR__ . '/../views/login.php';
+    exit;
+}
+
 $pdo = Database::getConnection();
 $activeUser = getActiveUser($pdo);
 $allUsers = getAllUsers($pdo);
 $componentsSummary = getComponentsSummary($pdo);
-
-$action = $_GET['action'] ?? ($_POST['action'] ?? '');
 
 // ============================================================
 // API & FORM POST HANDLERS

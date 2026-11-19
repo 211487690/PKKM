@@ -8,6 +8,7 @@ import {
   Code2,
   Download,
   LayoutDashboard,
+  LogOut,
   Menu,
   ShieldCheck,
   Users,
@@ -27,6 +28,9 @@ import { ComponentChecklistView } from './components/ComponentChecklistView';
 import { TeamPicView } from './components/TeamPicView';
 import { NotificationsView } from './components/NotificationsView';
 import { PhpDeployView } from './components/PhpDeployView';
+import { LoginView } from './components/LoginView';
+
+const AUTH_TOKEN_KEY = 'pkkm_auth_token';
 
 type NavTab =
   | 'dashboard'
@@ -39,6 +43,8 @@ type NavTab =
   | 'php-deploy';
 
 export default function App() {
+  const [authChecking, setAuthChecking] = useState<boolean>(true);
+  const [authUser, setAuthUser] = useState<{ username: string; name: string } | null>(null);
   const [activeTab, setActiveTab] = useState<NavTab>('dashboard');
   const [activeUserId, setActiveUserId] = useState<string>('tata-usaha');
   const [progressMap, setProgressMap] = useState<Record<string, IndicatorProgress>>({});
@@ -49,6 +55,36 @@ export default function App() {
   const [highlightedIndicatorId, setHighlightedIndicatorId] = useState<string | null>(null);
   const [selectedTeamPicId, setSelectedTeamPicId] = useState<string | null>(null);
   const [toastMsg, setToastMsg] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    const verifySession = async () => {
+      const token = localStorage.getItem(AUTH_TOKEN_KEY);
+      if (!token) {
+        if (!cancelled) setAuthChecking(false);
+        return;
+      }
+      try {
+        const res = await fetch('/api/auth/me', {
+          headers: { Authorization: `Bearer ${token}` },
+        });
+        if (res.ok) {
+          const data = await res.json();
+          if (!cancelled && data.authenticated) {
+            setAuthUser(data.user);
+          }
+        } else {
+          localStorage.removeItem(AUTH_TOKEN_KEY);
+        }
+      } finally {
+        if (!cancelled) setAuthChecking(false);
+      }
+    };
+    verifySession();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   const loadState = useCallback(async () => {
     try {
@@ -64,8 +100,23 @@ export default function App() {
   }, []);
 
   useEffect(() => {
-    loadState();
-  }, [loadState]);
+    if (authUser) {
+      loadState();
+    }
+  }, [authUser, loadState]);
+
+  const handleLoginSuccess = (token: string, user: { username: string; name: string }) => {
+    localStorage.setItem(AUTH_TOKEN_KEY, token);
+    setAuthUser(user);
+    setLoading(true);
+  };
+
+  const handleLogout = async () => {
+    localStorage.removeItem(AUTH_TOKEN_KEY);
+    await fetch('/api/auth/logout', { method: 'POST' }).catch(() => {});
+    setAuthUser(null);
+    setActiveTab('dashboard');
+  };
 
   const activeUser = useMemo(
     () => PIC_USERS.find((u) => u.id === activeUserId) ?? PIC_USERS[1],
@@ -287,15 +338,24 @@ export default function App() {
 
   const renderSidebarContent = () => (
     <div className="flex flex-col h-full text-slate-100">
-      <div className="p-5 border-b border-teal-800/70 bg-teal-950/40">
-        <div className="text-[11px] font-semibold text-teal-300 tracking-wider">
-          {MADRASAH_INFO.namaMadrasah}
+      <div className="p-5 border-b border-teal-800/70 bg-teal-950/40 flex items-center gap-3">
+        <div className="w-11 h-11 rounded-lg bg-white p-1 shrink-0 flex items-center justify-center border border-teal-400/30">
+          <img
+            src="/assets/aistudio/LOGO_MIA_06_23b19dba.png"
+            alt="Logo MI Almaarif 06"
+            className="w-full h-full object-contain"
+          />
         </div>
-        <div className="font-display text-lg font-bold text-white mt-0.5 tracking-wide">
-          SIP-PKKM 2026
-        </div>
-        <div className="text-xs text-slate-300 mt-1">
-          Ceklist Level 4 · 89 Butir Indikator
+        <div className="min-w-0">
+          <div className="text-[10px] font-semibold text-teal-300 tracking-wider truncate">
+            {MADRASAH_INFO.namaMadrasah}
+          </div>
+          <div className="font-display text-base font-bold text-white mt-0.5 tracking-wide truncate">
+            SIP-PKKM 2026
+          </div>
+          <div className="text-[11px] text-slate-300">
+            Ceklist Level 4 · 89 Indikator
+          </div>
         </div>
       </div>
 
@@ -461,6 +521,20 @@ export default function App() {
     </div>
   );
 
+  if (authChecking) {
+    return (
+      <div className="min-h-screen bg-slate-100 flex items-center justify-center p-6">
+        <div className="bg-white border border-slate-200 rounded-xl px-6 py-4 text-xs font-medium text-slate-600">
+          Memeriksa sesi autentikasi...
+        </div>
+      </div>
+    );
+  }
+
+  if (!authUser) {
+    return <LoginView onLoginSuccess={handleLoginSuccess} />;
+  }
+
   return (
     <div className="min-h-screen flex bg-slate-50 text-slate-900">
       {/* Desktop Sidebar — Hijau Tosca & Abu-abu */}
@@ -530,10 +604,20 @@ export default function App() {
             <button
               type="button"
               onClick={handleExportCsv}
-              className="inline-flex items-center gap-1.5 px-4 py-2 text-xs font-semibold bg-teal-700 text-white rounded-lg hover:bg-teal-800 whitespace-nowrap shrink-0"
+              className="inline-flex items-center gap-1.5 px-3.5 py-2 text-xs font-semibold bg-teal-700 text-white rounded-lg hover:bg-teal-800 whitespace-nowrap shrink-0"
             >
               <Download className="w-3.5 h-3.5" />
               <span>Ekspor CSV</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={handleLogout}
+              title="Keluar dari akun"
+              className="inline-flex items-center gap-1.5 px-3 py-2 text-xs font-medium border border-slate-200 rounded-lg text-slate-700 hover:bg-slate-50 whitespace-nowrap shrink-0"
+            >
+              <LogOut className="w-3.5 h-3.5 text-slate-500" />
+              <span className="hidden sm:inline">Keluar</span>
             </button>
 
             {/* Popover Notifikasi Progres Relevan */}

@@ -1,3 +1,4 @@
+import crypto from 'crypto';
 import express from 'express';
 import fs from 'fs';
 import path from 'path';
@@ -17,7 +18,55 @@ const __dirname = path.dirname(__filename);
 
 const DATA_DIR = path.resolve(__dirname, 'data');
 const STATE_FILE = path.join(DATA_DIR, 'pkkm_state.json');
+const AUTH_SECRET_FILE = path.join(DATA_DIR, '.auth-secret');
 const PHP_DEPLOY_DIR = path.resolve(__dirname, 'php-vercel-deploy');
+
+const ADMIN_USERNAME = 'admin';
+const ADMIN_PASS_HASH = crypto.createHash('sha256').update('admin123').digest();
+
+function getAuthSecret(): string {
+  fs.mkdirSync(DATA_DIR, { recursive: true });
+  if (fs.existsSync(AUTH_SECRET_FILE)) {
+    const existing = fs.readFileSync(AUTH_SECRET_FILE, 'utf8').trim();
+    if (existing.length >= 32) return existing;
+  }
+  const secret = crypto.randomBytes(32).toString('hex');
+  fs.writeFileSync(AUTH_SECRET_FILE, secret, 'utf8');
+  return secret;
+}
+
+function signSessionToken(username: string): string {
+  const payload = Buffer.from(
+    JSON.stringify({
+      u: username,
+      exp: Date.now() + 1000 * 60 * 60 * 24 * 7, // 7 hari
+    })
+  ).toString('base64url');
+  const sig = crypto.createHmac('sha256', getAuthSecret()).update(payload).digest('base64url');
+  return `${payload}.${sig}`;
+}
+
+function verifySessionToken(token: string | undefined): { username: string } | null {
+  if (!token || !token.includes('.')) return null;
+  const [payload, sig] = token.split('.');
+  if (!payload || !sig) return null;
+  const expectedSig = crypto.createHmac('sha256', getAuthSecret()).update(payload).digest('base64url');
+  const sigBuf = Buffer.from(sig);
+  const expBuf = Buffer.from(expectedSig);
+  if (sigBuf.length !== expBuf.length || !crypto.timingSafeEqual(sigBuf, expBuf)) {
+    return null;
+  }
+  try {
+    const decoded = JSON.parse(Buffer.from(payload, 'base64url').toString('utf8')) as {
+      u?: string;
+      exp?: number;
+    };
+    if (!decoded.u || !decoded.exp || Date.now() > decoded.exp) return null;
+    return { username: decoded.u };
+  } catch {
+    return null;
+  }
+}
 
 interface ServerState {
   progress: Record<string, IndicatorProgress>;
@@ -164,10 +213,14 @@ function saveState(state: ServerState): void {
   fs.renameSync(tmpFile, STATE_FILE);
 }
 
-function collectFilesRecursively(dirPath: string, baseDir: string): { path: string; content: string }[] {
-  const results: { path: string; content: string }[] = [];
+function collectFilesRecursively(
+  dirPath: string,
+  baseDir: string
+): { path: string; content: string | Buffer; isBinary: boolean }[] {
+  const results: { path: string; content: string | Buffer; isBinary: boolean }[] = [];
   if (!fs.existsSync(dirPath)) return results;
 
+  const binaryExts = new Set(['.png', '.jpg', '.jpeg', '.webp', '.ico', '.pdf']);
   const entries = fs.readdirSync(dirPath, { withFileTypes: true });
   for (const entry of entries) {
     const fullPath = path.join(dirPath, entry.name);
@@ -175,9 +228,12 @@ function collectFilesRecursively(dirPath: string, baseDir: string): { path: stri
     if (entry.isDirectory()) {
       results.push(...collectFilesRecursively(fullPath, baseDir));
     } else {
+      const ext = path.extname(entry.name).toLowerCase();
+      const isBinary = binaryExts.has(ext);
       results.push({
         path: relPath,
-        content: fs.readFileSync(fullPath, 'utf8'),
+        content: isBinary ? fs.readFileSync(fullPath) : fs.readFileSync(fullPath, 'utf8'),
+        isBinary,
       });
     }
   }
@@ -190,6 +246,53 @@ async function startServer() {
 
   const app = express();
   app.use(express.json({ limit: '2mb' }));
+
+  // 0. Authentication endpoints
+  app.post('/api/auth/login', (req, res) => {
+    const { username, password } = req.body as { username?: string; password?: string };
+    const cleanUser = String(username ?? '').trim();
+    const passHash = crypto.createHash('sha256').update(String(password ?? '')).digest();
+
+    const userValid = cleanUser === ADMIN_USERNAME;
+    const passValid =
+      passHash.length === ADMIN_PASS_HASH.length &&
+      crypto.timingSafeEqual(passHash, ADMIN_PASS_HASH);
+
+    if (!userValid || !passValid) {
+      res.status(401).json({ error: 'Username atau password tidak sesuai.' });
+      return;
+    }
+
+    const token = signSessionToken(cleanUser);
+    res.json({
+      token,
+      user: {
+        username: cleanUser,
+        name: 'Administrator MI Almaarif 06 Toyomarto',
+      },
+    });
+  });
+
+  app.get('/api/auth/me', (req, res) => {
+    const authHeader = req.headers.authorization;
+    const token = authHeader?.startsWith('Bearer ') ? authHeader.slice(7).trim() : undefined;
+    const verified = verifySessionToken(token);
+    if (!verified) {
+      res.status(401).json({ authenticated: false });
+      return;
+    }
+    res.json({
+      authenticated: true,
+      user: {
+        username: verified.username,
+        name: 'Administrator MI Almaarif 06 Toyomarto',
+      },
+    });
+  });
+
+  app.post('/api/auth/logout', (_req, res) => {
+    res.json({ ok: true });
+  });
 
   // 1. State endpoint
   app.get('/api/state', (_req, res) => {
@@ -469,7 +572,9 @@ async function startServer() {
 
   // 5. Inspectable PHP Native PDO + MySQL + Tailwind CSS files
   app.get('/api/php-files', (_req, res) => {
-    const files = collectFilesRecursively(PHP_DEPLOY_DIR, PHP_DEPLOY_DIR);
+    const files = collectFilesRecursively(PHP_DEPLOY_DIR, PHP_DEPLOY_DIR)
+      .filter((f) => !f.isBinary)
+      .map((f) => ({ path: f.path, content: String(f.content) }));
     res.json({ files });
   });
 
